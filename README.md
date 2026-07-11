@@ -37,3 +37,9 @@ The plugin solves several architecture-specific hurdles inherent to GoldSrc/Sven
 
 * **C++ Standard**: Compiled under C++20 (`stdcpp20`).
 * **Thread Safety**: Global callback registration states should leverage atomic operations or lock-free queue models if processed across multiple threads. Consumers must avoid long-running or blocking code in `OnImGuiFrame` callbacks to maintain consistent rendering frame times.
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
