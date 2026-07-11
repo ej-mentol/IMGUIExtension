@@ -1,0 +1,24 @@
+# MSBuild / Visual Studio output and cache directories
+**/[Dd]ebug/
+**/[Rr]elease/
+**/[Rr]elease_AVX2/
+**/.vs/
+
+# User-specific project settings (preserves local debug paths)
+**/*.vcxproj.user
+
+# Visual Studio / compiler database and cache
+**/*.VC.db
+**/*.ipch
+**/*.aps
+
+# Intermediate compilation and linker files
+**/*.obj
+**/*.pdb
+**/*.iobj
+**/*.ipdb
+**/*.tlog
+**/*.recipe
+**/*.log
+**/*.idb
+**/*.ilk

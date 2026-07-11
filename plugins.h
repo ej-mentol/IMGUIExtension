@@ -1,0 +1,47 @@
+#pragma once
+
+#include <metahook.h>
+#include "IImGuiExtension.h"
+
+extern cl_exportfuncs_t gExportfuncs;
+extern cl_enginefunc_t gEngfuncs;
+extern metahook_api_t* g_pMetaHookAPI;
+extern mh_interface_t* g_pInterface;
+extern mh_enginesave_t* g_pMetaSave;
+extern IFileSystem* g_pFileSystem;
+extern IFileSystem_HL25* g_pFileSystem_HL25;
+
+extern int glwidth, glheight;
+extern int* g_iVisibleMouse;
+
+extern float g_vRawDeltaX;
+extern float g_vRawDeltaY;
+
+// Forward declarations for exports
+int HUD_Redraw(float time, int intermission);
+void HUD_Shutdown(void);
+void IN_MouseEvent(int mstate);
+void IN_Accumulate(void);
+void CL_CreateMove(float frametime, struct usercmd_s* cmd, int active);
+
+// Hooked function pointers
+extern int (*g_pfnHUD_Redraw)(float time, int intermission);
+extern void (*g_pfnIN_MouseEvent)(int mstate);
+extern void (*g_pfnIN_Accumulate)(void);
+extern void (*g_pfnCL_CreateMove)(float frametime, struct usercmd_s* cmd, int active);
+
+void PrivateFuncs_Init();
+void ImGui_InitOnce();
+void ImGui_Shutdown();
+bool AnyWantsInputCapture();
+
+class CImGuiExtension : public IImGuiExtension
+{
+public:
+	void RegisterCallbacks(IImGuiExtensionCallbacks* cb) override;
+	void UnregisterCallbacks(IImGuiExtensionCallbacks* cb) override;
+	ImGuiContext* GetImGuiContext() override;
+	void GetRawMouseDelta(float* mx, float* my) override;
+};
+
+extern CImGuiExtension g_ImGuiExtension;
