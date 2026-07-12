@@ -335,7 +335,7 @@ void CImGuiExtension::GetRawMouseDelta(float* mx, float* my)
 
 CImGuiExtension g_ImGuiExtension;
 
-static bool s_bGameUIActive = true;
+static bool s_bGameUIActive = false;
 static bool s_bLastWantsCapture = false;
 static std::chrono::steady_clock::time_point s_LastFrameTime = std::chrono::steady_clock::now();
 static std::chrono::steady_clock::time_point s_LastCaptureTransition = std::chrono::steady_clock::now();
