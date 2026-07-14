@@ -225,11 +225,6 @@ static int VKFromVguiKeyCode(int k)
 	return 0;
 }
 
-bool AnyWantsInputCapture()
-{
-	return g_Dispatcher.AnyWantsInputCapture();
-}
-
 void UpdateInputCaptureState()
 {
 	bool anyWantsCapture = g_Dispatcher.AnyWantsInputCapture();
