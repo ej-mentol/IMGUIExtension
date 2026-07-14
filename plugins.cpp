@@ -16,6 +16,7 @@ IFileSystem_HL25* g_pFileSystem_HL25 = nullptr;
 void (*g_pfnHUD_Init)(void) = nullptr;
 int  (*g_pfnHUD_VidInit)(void) = nullptr;
 int  (*g_pfnHUD_Redraw)(float time, int intermission) = nullptr;
+int  (*g_pfnHUD_Key_Event)(int down, int keynum, const char* pszCurrentBinding) = nullptr;
 void (*g_pfnIN_MouseEvent)(int mstate) = nullptr;
 void (*g_pfnIN_Accumulate)(void) = nullptr;
 
@@ -85,6 +86,9 @@ void IPluginsV4::LoadClient(cl_exportfuncs_t* pExportFunc)
 
 	g_pfnIN_Accumulate = pExportFunc->IN_Accumulate;
 	pExportFunc->IN_Accumulate = IN_Accumulate;
+
+	g_pfnHUD_Key_Event = pExportFunc->HUD_Key_Event;
+	pExportFunc->HUD_Key_Event = HUD_Key_Event;
 
 	PrivateFuncs_Init();
 	IMGUI_VGUI2Extension_Init();

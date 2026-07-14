@@ -48,31 +48,12 @@ public:
 		if (down == 0)
 		{
 			// GoldSrc does not guarantee a valid pszCurrentBinding on keyup — the pointer may be dangling.
-			// Use the keynum→command map instead to find what to release.
+			// Use the keynum->command map (populated by HUD_Key_Event) to find what to release.
 			auto it = g_KeyToCommand.find(keynum);
 			if (it != g_KeyToCommand.end())
 			{
 				g_HeldCommands.erase(it->second);
 				g_KeyToCommand.erase(it);
-			}
-		}
-		else
-		{
-			// On keydown, record the physical key→command mapping unconditionally.
-			// The physical state of the key must be tracked regardless of whether ImGui has capture,
-			// so that restoration on capture OFF is accurate even if the key was pressed during menu open.
-			if (pszCurrentBinding)
-			{
-				std::string binding = pszCurrentBinding;
-				if (binding == "+attack" || binding == "+attack2" ||
-					binding == "+forward" || binding == "+back" ||
-					binding == "+moveleft" || binding == "+moveright" ||
-					binding == "+jump" || binding == "+duck" ||
-					binding == "+use")
-				{
-					g_KeyToCommand[keynum] = binding;
-					g_HeldCommands.insert(binding);
-				}
 			}
 		}
 

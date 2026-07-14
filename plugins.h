@@ -32,6 +32,7 @@ void IN_Accumulate(void);
 
 // Hooked function pointers
 extern int (*g_pfnHUD_Redraw)(float time, int intermission);
+extern int (*g_pfnHUD_Key_Event)(int down, int keynum, const char* pszCurrentBinding);
 extern void (*g_pfnIN_MouseEvent)(int mstate);
 extern void (*g_pfnIN_Accumulate)(void);
 
