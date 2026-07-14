@@ -150,6 +150,34 @@ bool AnyWantsInputCapture()
 	return g_Dispatcher.AnyWantsInputCapture();
 }
 
+// Maps a game command string to the set of Windows VK codes that could physically trigger it,
+// covering default WASD, arrow keys, and numpad layouts.
+// Used ONLY to filter g_HeldCommands at capture ON — not as a primary restore mechanism.
+// If a command has no known VK mapping, it is excluded from the snapshot (safe default).
+static std::vector<int> GetVKsForCommand(const char* cmd)
+{
+	if (strcmp(cmd, "+forward")   == 0) return { 'W', VK_UP,    VK_NUMPAD8 };
+	if (strcmp(cmd, "+back")      == 0) return { 'S', VK_DOWN,  VK_NUMPAD2 };
+	if (strcmp(cmd, "+moveleft")  == 0) return { 'A', VK_LEFT,  VK_NUMPAD4 };
+	if (strcmp(cmd, "+moveright") == 0) return { 'D', VK_RIGHT, VK_NUMPAD6 };
+	if (strcmp(cmd, "+jump")      == 0) return { VK_SPACE };
+	if (strcmp(cmd, "+duck")      == 0) return { VK_LCONTROL, VK_RCONTROL };
+	if (strcmp(cmd, "+use")       == 0) return { 'E', 'F' };
+	if (strcmp(cmd, "+attack")    == 0) return { VK_LBUTTON };
+	if (strcmp(cmd, "+attack2")   == 0) return { VK_RBUTTON };
+	return {};
+}
+
+static bool IsCommandPhysicallyHeld(const std::string& cmd)
+{
+	for (int vk : GetVKsForCommand(cmd.c_str()))
+	{
+		if (GetAsyncKeyState(vk) & 0x8000)
+			return true;
+	}
+	return false;
+}
+
 void UpdateInputCaptureState()
 {
 	bool anyWantsCapture = g_Dispatcher.AnyWantsInputCapture();
@@ -166,9 +194,15 @@ void UpdateInputCaptureState()
 		s_bLastWantsCapture = anyWantsCapture;
 		if (anyWantsCapture)
 		{
-			// Snapshot what was physically held at the moment of capture, then clear tracking.
-			// Clearing prevents stale entries from accumulating if keyup events were missed.
-			g_PreCaptureCommands = g_HeldCommands;
+			// Build snapshot: only include commands that are physically held RIGHT NOW.
+			// Key_Event is not called on keyup by GoldSrc, so g_HeldCommands accumulates stale
+			// entries over time. GetAsyncKeyState at this exact moment is the only reliable filter.
+			g_PreCaptureCommands.clear();
+			for (const auto& cmd : g_HeldCommands)
+			{
+				if (IsCommandPhysicallyHeld(cmd))
+					g_PreCaptureCommands.insert(cmd);
+			}
 			g_HeldCommands.clear();
 			g_KeyToCommand.clear();
 
