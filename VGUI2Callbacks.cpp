@@ -47,9 +47,8 @@ public:
 	{
 		if (down == 0)
 		{
-			// Empirical check: does GoldSrc pass pszCurrentBinding on keyup? Log it to verify the comment above.
-			gEngfuncs.Con_DPrintf("[IMGUIExtension] Key_Event keyup: keynum=%d binding=%s\n",
-				keynum, pszCurrentBinding ? pszCurrentBinding : "(null)");
+			// GoldSrc does not guarantee a valid pszCurrentBinding on keyup — the pointer may be dangling.
+			// Use the keynum→command map instead to find what to release.
 			auto it = g_KeyToCommand.find(keynum);
 			if (it != g_KeyToCommand.end())
 			{
