@@ -26,14 +26,14 @@ extern float g_vRawDeltaY;
 
 // Forward declarations for exports
 int HUD_Redraw(float time, int intermission);
-int HUD_Key_Event(int down, int keynum, const char* pszCurrentBinding);
+int HUD_Key_Event(int eventcode, int keynum, const char* pszCurrentBinding);
 void HUD_Shutdown(void);
 void IN_MouseEvent(int mstate);
 void IN_Accumulate(void);
 
 // Hooked function pointers
 extern int (*g_pfnHUD_Redraw)(float time, int intermission);
-extern int (*g_pfnHUD_Key_Event)(int down, int keynum, const char* pszCurrentBinding);
+extern int (*g_pfnHUD_Key_Event)(int eventcode, int keynum, const char* pszCurrentBinding);
 extern void (*g_pfnIN_MouseEvent)(int mstate);
 extern void (*g_pfnIN_Accumulate)(void);
 

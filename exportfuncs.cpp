@@ -17,12 +17,12 @@ int HUD_Redraw(float time, int intermission)
 	return g_pfnHUD_Redraw(time, intermission);
 }
 
-int HUD_Key_Event(int down, int keynum, const char* pszCurrentBinding)
+int HUD_Key_Event(int eventcode, int keynum, const char* pszCurrentBinding)
 {
-	// Track keydown events for the input capture snapshot.
-	// GoldSrc only calls this on keydown (down == 1) during normal gameplay.
-	// Blocking is handled by VGUI2Callbacks Key_Event — this hook is tracking only.
-	if (down == 1 && pszCurrentBinding)
+	// GoldSrc calls this for every key event. eventcode: 0 = keyup, 1 = keydown.
+	// Track keydown bindings into g_KeyToCommand for the capture ON snapshot.
+	// Blocking is handled separately by VGUI2Callbacks — this hook is tracking only.
+	if (eventcode == 1 && pszCurrentBinding)
 	{
 		std::string binding = pszCurrentBinding;
 		if (binding == "+attack" || binding == "+attack2" ||
@@ -36,7 +36,7 @@ int HUD_Key_Event(int down, int keynum, const char* pszCurrentBinding)
 		}
 	}
 
-	return g_pfnHUD_Key_Event ? g_pfnHUD_Key_Event(down, keynum, pszCurrentBinding) : 1;
+	return g_pfnHUD_Key_Event ? g_pfnHUD_Key_Event(eventcode, keynum, pszCurrentBinding) : 1;
 }
 
 void IN_MouseEvent(int mstate)

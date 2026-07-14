@@ -16,7 +16,7 @@ IFileSystem_HL25* g_pFileSystem_HL25 = nullptr;
 void (*g_pfnHUD_Init)(void) = nullptr;
 int  (*g_pfnHUD_VidInit)(void) = nullptr;
 int  (*g_pfnHUD_Redraw)(float time, int intermission) = nullptr;
-int  (*g_pfnHUD_Key_Event)(int down, int keynum, const char* pszCurrentBinding) = nullptr;
+int  (*g_pfnHUD_Key_Event)(int eventcode, int keynum, const char* pszCurrentBinding) = nullptr;
 void (*g_pfnIN_MouseEvent)(int mstate) = nullptr;
 void (*g_pfnIN_Accumulate)(void) = nullptr;
 
