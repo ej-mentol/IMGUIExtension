@@ -1,7 +1,13 @@
 #pragma once
 
 #include <metahook.h>
+#include <string>
+#include <set>
+#include <map>
 #include "IImGuiExtension.h"
+
+extern std::set<std::string> g_HeldCommands;
+extern std::map<int, std::string> g_KeyToCommand;
 
 extern cl_exportfuncs_t gExportfuncs;
 extern cl_enginefunc_t gEngfuncs;
@@ -22,13 +28,11 @@ int HUD_Redraw(float time, int intermission);
 void HUD_Shutdown(void);
 void IN_MouseEvent(int mstate);
 void IN_Accumulate(void);
-void CL_CreateMove(float frametime, struct usercmd_s* cmd, int active);
 
 // Hooked function pointers
 extern int (*g_pfnHUD_Redraw)(float time, int intermission);
 extern void (*g_pfnIN_MouseEvent)(int mstate);
 extern void (*g_pfnIN_Accumulate)(void);
-extern void (*g_pfnCL_CreateMove)(float frametime, struct usercmd_s* cmd, int active);
 
 void PrivateFuncs_Init();
 void ImGui_InitOnce();

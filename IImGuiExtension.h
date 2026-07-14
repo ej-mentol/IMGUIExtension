@@ -34,7 +34,7 @@ public:
 
 	// Return true if this module allows this specific key to pass through to the engine even when WantsInputCapture() is true.
 	// Defaults to allowing the console tilde key (VK_OEM_3 = 192) to prevent locking players out of the game console.
-	virtual bool AllowKeyPassthrough(int keynum) const
+	virtual bool AllowKeyPassthrough(int keynum, const char* pszCurrentBinding) const
 	{
 		if (keynum == VK_OEM_3) // '`~' tilde key — opens game console
 			return true;

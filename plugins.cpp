@@ -1,6 +1,7 @@
 #include "plugins.h"
 #include "privatefuncs.h"
 #include "exportfuncs.h"
+#include "InputCapture.h"
 #include <interface.h>
 #include "version.h"
 
@@ -17,12 +18,13 @@ int  (*g_pfnHUD_VidInit)(void) = nullptr;
 int  (*g_pfnHUD_Redraw)(float time, int intermission) = nullptr;
 void (*g_pfnIN_MouseEvent)(int mstate) = nullptr;
 void (*g_pfnIN_Accumulate)(void) = nullptr;
-void (*g_pfnCL_CreateMove)(float frametime, struct usercmd_s* cmd, int active) = nullptr;
 
 int glwidth = 0;
 int glheight = 0;
 float g_vRawDeltaX = 0.0f;
 float g_vRawDeltaY = 0.0f;
+std::set<std::string> g_HeldCommands;
+std::map<int, std::string> g_KeyToCommand;
 
 void HUD_Init(void)
 {
@@ -83,9 +85,6 @@ void IPluginsV4::LoadClient(cl_exportfuncs_t* pExportFunc)
 	g_pfnIN_Accumulate = pExportFunc->IN_Accumulate;
 	pExportFunc->IN_Accumulate = IN_Accumulate;
 
-	g_pfnCL_CreateMove = pExportFunc->CL_CreateMove;
-	pExportFunc->CL_CreateMove = CL_CreateMove;
-
 	PrivateFuncs_Init();
 	IMGUI_VGUI2Extension_Init();
 
@@ -98,6 +97,31 @@ void IPluginsV4::ExitGame(int iResult)
 	IMGUI_VGUI2Extension_Shutdown();
 	ImGui_Shutdown();
 }
+
+// CImGuiExtension implementation
+void CImGuiExtension::RegisterCallbacks(IImGuiExtensionCallbacks* cb)
+{
+	g_Dispatcher.Register(cb);
+}
+
+void CImGuiExtension::UnregisterCallbacks(IImGuiExtensionCallbacks* cb)
+{
+	g_Dispatcher.Unregister(cb);
+}
+
+ImGuiContext* CImGuiExtension::GetImGuiContext()
+{
+	ImGui_InitOnce();
+	return g_pImGuiContext;
+}
+
+void CImGuiExtension::GetRawMouseDelta(float* mx, float* my)
+{
+	if (mx) *mx = g_vRawDeltaX;
+	if (my) *my = g_vRawDeltaY;
+}
+
+CImGuiExtension g_ImGuiExtension;
 
 const char* IPluginsV4::GetVersion(void)
 {

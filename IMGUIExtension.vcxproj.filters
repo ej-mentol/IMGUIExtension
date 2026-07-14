@@ -4,6 +4,9 @@
     <ClCompile Include="plugins.cpp" />
     <ClCompile Include="exportfuncs.cpp" />
     <ClCompile Include="privatefuncs.cpp" />
+    <ClCompile Include="FontAtlas.cpp" />
+    <ClCompile Include="InputCapture.cpp" />
+    <ClCompile Include="VGUI2Callbacks.cpp" />
     <ClCompile Include="thirdparty\imgui\imgui.cpp" />
     <ClCompile Include="thirdparty\imgui\imgui_draw.cpp" />
     <ClCompile Include="thirdparty\imgui\imgui_tables.cpp" />
@@ -16,5 +19,8 @@
     <ClInclude Include="plugins.h" />
     <ClInclude Include="exportfuncs.h" />
     <ClInclude Include="privatefuncs.h" />
+    <ClInclude Include="FontAtlas.h" />
+    <ClInclude Include="InputCapture.h" />
+    <ClInclude Include="VGUI2Callbacks.h" />
   </ItemGroup>
 </Project>

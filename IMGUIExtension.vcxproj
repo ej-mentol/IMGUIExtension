@@ -65,11 +65,11 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <PreBuildEvent>
-      <Command>powershell -NoProfile -Command &quot;'#pragma once', ('#define IMGUI_EXTENSION_VERSION ' + [char]34 + '1.0.0.' + [DateTime]::Now.ToString('yyMMdd.HHmm') + [char]34) | Out-File -FilePath '$(ProjectDir)version.h' -Encoding utf8&quot;</Command>
+      <Command>powershell -NoProfile -Command &quot;'#pragma once', ('#define IMGUI_EXTENSION_VERSION ' + [char]34 + '1.0.0-dev.' + [DateTime]::Now.ToString('yyMMdd.HHmm') + [char]34) | Out-File -FilePath '$(ProjectDir)version.h' -Encoding utf8&quot;</Command>
     </PreBuildEvent>
     <ClCompile>
       <AdditionalOptions>/MP %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>.\;$(ProjectDir);$(ProjectDir)thirdparty\imgui;$(ProjectDir)thirdparty\imgui\backends;$(CapstoneIncludeDirectory);$(SDL2IncludeDirectory);$(SolutionDir)thirdparty\sdl2-compat-fork\include;$(SolutionDir)include;$(SolutionDir)include\Interface;$(SolutionDir)include\Interface\VGUI;$(SolutionDir)include\HLSDK;$(SolutionDir)include\HLSDK\common;$(SolutionDir)include\HLSDK\engine;$(SolutionDir)include\HLSDK\cl_dll;$(SolutionDir)include\HLSDK\public;$(SolutionDir)include\HLSDK\pm_shared;$(SolutionDir)include\VGUI;$(SolutionDir)include\vgui_controls;$(SolutionDir)include\interface;$(SolutionDir)include\SourceSDK;$(SolutionDir)include\SourceSDK\tier0;$(SolutionDir)include\SourceSDK\tier1;$(SolutionDir)include\SourceSDK\vstdlib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\;$(ProjectDir);$(ProjectDir)thirdparty\imgui;$(ProjectDir)thirdparty\imgui\backends;$(CapstoneIncludeDirectory);$(SDL2IncludeDirectory);$(SolutionDir)thirdparty\sdl2-compat-fork\include;$(SolutionDir)thirdparty\rapidjson\include;$(SolutionDir)include;$(SolutionDir)include\Interface;$(SolutionDir)include\Interface\VGUI;$(SolutionDir)include\HLSDK;$(SolutionDir)include\HLSDK\common;$(SolutionDir)include\HLSDK\engine;$(SolutionDir)include\HLSDK\cl_dll;$(SolutionDir)include\HLSDK\public;$(SolutionDir)include\HLSDK\pm_shared;$(SolutionDir)include\VGUI;$(SolutionDir)include\vgui_controls;$(SolutionDir)include\interface;$(SolutionDir)include\SourceSDK;$(SolutionDir)include\SourceSDK\tier0;$(SolutionDir)include\SourceSDK\tier1;$(SolutionDir)include\SourceSDK\vstdlib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_WINDOWS;_USRDLL;_CRT_SECURE_NO_WARNINGS;NO_MALLOC_OVERRIDE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <PrecompiledHeader />
@@ -116,6 +116,9 @@
     <ClCompile Include="plugins.cpp" />
     <ClCompile Include="exportfuncs.cpp" />
     <ClCompile Include="privatefuncs.cpp" />
+    <ClCompile Include="FontAtlas.cpp" />
+    <ClCompile Include="InputCapture.cpp" />
+    <ClCompile Include="VGUI2Callbacks.cpp" />
     <ClCompile Include="$(SolutionDir)include\HLSDK\common\interface.cpp" />
     <ClCompile Include="thirdparty\imgui\imgui.cpp" />
     <ClCompile Include="thirdparty\imgui\imgui_draw.cpp" />
@@ -129,6 +132,9 @@
     <ClInclude Include="plugins.h" />
     <ClInclude Include="exportfuncs.h" />
     <ClInclude Include="privatefuncs.h" />
+    <ClInclude Include="FontAtlas.h" />
+    <ClInclude Include="InputCapture.h" />
+    <ClInclude Include="VGUI2Callbacks.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

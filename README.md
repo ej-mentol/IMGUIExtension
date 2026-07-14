@@ -11,9 +11,9 @@ The plugin solves several architecture-specific hurdles inherent to GoldSrc/Sven
 ### Key Architectural Features
 
 1. **Unified Context & Font Atlas**
-   The global `ImGuiContext` is created lazily on the first rendering frame. Fonts are loaded and merged **before** backend compilation to ensure structural integrity of the font atlas.
-   * **Extended Unicode Support**: Loads `segoeui.ttf` with raw glyph ranges `[0x0020, 0x00FF]` and `[0x0400, 0x052F]`.
-   * **Unicode Symbol Merging**: Merges `seguisym.ttf` (Segoe UI Symbol) with `MergeMode = true` covering geometric shapes, miscellaneous symbols, and dingbats `[0x25A0, 0x27BF]`. This allows consumers to render vector-like icons from standard 16-bit Unicode symbol charts.
+   The global `ImGuiContext` is created lazily on the first rendering frame. Fonts are loaded and merged dynamically based on the local configuration file `imguiextension/imguiextension.json` before backend compilation. By default, the extension:
+   * **Configures Local Fonts**: Automatically lists and configures TrueType font files placed in the `imguiextension/fonts/` directory.
+   * **Supports Merged Glyphs**: Allows merging multiple icon or symbol fonts (such as Font Awesome or Segoe UI Symbol) using ImGui's `MergeMode = true`, covering standard Latin, Cyrillic, and Private Use Area (PUA) symbol charts `[0xF000, 0xFFFF]`.
 
 2. **Cached HWND Arbitrator**
    Sven Co-op's VGUI2 engine creates native Win32 child text boxes (e.g., when the chat box gains focus), which collapses the standard active window metrics. `IMGUIExtension` uses an `EnumWindows` callback to match the current process ID against class names `"SDL_app"` or `"ValveHalfLifeWindow"`, caching the true top-level game window. This ensures consistent viewport dimensions and prevents coordinate collapsing.

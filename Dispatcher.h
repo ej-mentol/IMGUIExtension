@@ -33,6 +33,9 @@ public:
 		{
 			if (cb) cb->Shutdown();
 		}
+		m_Callbacks.clear();
+		m_PendingAdditions.clear();
+		m_PendingShutdowns.clear();
 		m_bInitialized = false;
 		m_bStarted = false;
 		m_pEngineFuncs = nullptr;
@@ -72,20 +75,25 @@ public:
 
 		if (m_bIsIterating)
 		{
+			bool wasActive = false;
 			for (size_t i = 0; i < m_Callbacks.size(); ++i)
 			{
 				if (m_Callbacks[i] == cb)
 				{
 					m_Callbacks[i] = nullptr;
+					wasActive = true;
 				}
 			}
 			m_PendingAdditions.erase(
 				std::remove(m_PendingAdditions.begin(), m_PendingAdditions.end(), cb),
 				m_PendingAdditions.end()
 			);
-			if (std::find(m_PendingShutdowns.begin(), m_PendingShutdowns.end(), cb) == m_PendingShutdowns.end())
+			if (wasActive)
 			{
-				m_PendingShutdowns.push_back(cb);
+				if (std::find(m_PendingShutdowns.begin(), m_PendingShutdowns.end(), cb) == m_PendingShutdowns.end())
+				{
+					m_PendingShutdowns.push_back(cb);
+				}
 			}
 			return;
 		}
@@ -108,11 +116,11 @@ public:
 		return false;
 	}
 
-	bool AnyAllowsKeyPassthrough(int keynum) const
+	bool AnyAllowsKeyPassthrough(int keynum, const char* pszCurrentBinding) const
 	{
 		for (auto cb : m_Callbacks)
 		{
-			if (cb && cb->AllowKeyPassthrough(keynum))
+			if (cb && cb->AllowKeyPassthrough(keynum, pszCurrentBinding))
 				return true;
 		}
 		return false;
