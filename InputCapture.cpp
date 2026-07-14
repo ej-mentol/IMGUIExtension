@@ -150,32 +150,84 @@ bool AnyWantsInputCapture()
 	return g_Dispatcher.AnyWantsInputCapture();
 }
 
-// Maps a game command string to the set of Windows VK codes that could physically trigger it,
-// covering default WASD, arrow keys, and numpad layouts.
-// Used ONLY to filter g_HeldCommands at capture ON — not as a primary restore mechanism.
-// If a command has no known VK mapping, it is excluded from the snapshot (safe default).
-static std::vector<int> GetVKsForCommand(const char* cmd)
+// Converts a vgui::KeyCode (the keynum passed to Key_Event) to the corresponding Windows VK code.
+// This is a system-level mapping between two key enumeration systems — not a gameplay assumption.
+// Covers the full vgui::KeyCode enum from KeyCode.h so any player bind is handled correctly.
+static int VKFromVguiKeyCode(int k)
 {
-	if (strcmp(cmd, "+forward")   == 0) return { 'W', VK_UP,    VK_NUMPAD8 };
-	if (strcmp(cmd, "+back")      == 0) return { 'S', VK_DOWN,  VK_NUMPAD2 };
-	if (strcmp(cmd, "+moveleft")  == 0) return { 'A', VK_LEFT,  VK_NUMPAD4 };
-	if (strcmp(cmd, "+moveright") == 0) return { 'D', VK_RIGHT, VK_NUMPAD6 };
-	if (strcmp(cmd, "+jump")      == 0) return { VK_SPACE };
-	if (strcmp(cmd, "+duck")      == 0) return { VK_LCONTROL, VK_RCONTROL };
-	if (strcmp(cmd, "+use")       == 0) return { 'E', 'F' };
-	if (strcmp(cmd, "+attack")    == 0) return { VK_LBUTTON };
-	if (strcmp(cmd, "+attack2")   == 0) return { VK_RBUTTON };
-	return {};
+	// KEY_0..KEY_9 = 1..10  →  '0'..'9'
+	if (k >= 1  && k <= 10) return '0' + (k - 1);
+	// KEY_A..KEY_Z = 11..36  →  'A'..'Z'
+	if (k >= 11 && k <= 36) return 'A' + (k - 11);
+	// KEY_PAD_0..KEY_PAD_9 = 37..46  →  VK_NUMPAD0..VK_NUMPAD9
+	if (k >= 37 && k <= 46) return VK_NUMPAD0 + (k - 37);
+
+	switch (k)
+	{
+	case 47: return VK_DIVIDE;    // KEY_PAD_DIVIDE
+	case 48: return VK_MULTIPLY;  // KEY_PAD_MULTIPLY
+	case 49: return VK_SUBTRACT;  // KEY_PAD_MINUS
+	case 50: return VK_ADD;       // KEY_PAD_PLUS
+	case 51: return VK_RETURN;    // KEY_PAD_ENTER  (same VK as main Enter)
+	case 52: return VK_DECIMAL;   // KEY_PAD_DECIMAL
+	case 53: return VK_OEM_4;     // KEY_LBRACKET
+	case 54: return VK_OEM_6;     // KEY_RBRACKET
+	case 55: return VK_OEM_1;     // KEY_SEMICOLON
+	case 56: return VK_OEM_7;     // KEY_APOSTROPHE
+	case 57: return VK_OEM_3;     // KEY_BACKQUOTE
+	case 58: return VK_OEM_COMMA; // KEY_COMMA
+	case 59: return VK_OEM_PERIOD;// KEY_PERIOD
+	case 60: return VK_OEM_2;     // KEY_SLASH
+	case 61: return VK_OEM_5;     // KEY_BACKSLASH
+	case 62: return VK_OEM_MINUS; // KEY_MINUS
+	case 63: return VK_OEM_PLUS;  // KEY_EQUAL
+	case 64: return VK_RETURN;    // KEY_ENTER
+	case 65: return VK_SPACE;     // KEY_SPACE
+	case 66: return VK_BACK;      // KEY_BACKSPACE
+	case 67: return VK_TAB;       // KEY_TAB
+	case 68: return VK_CAPITAL;   // KEY_CAPSLOCK
+	case 69: return VK_NUMLOCK;   // KEY_NUMLOCK
+	case 70: return VK_ESCAPE;    // KEY_ESCAPE
+	case 71: return VK_SCROLL;    // KEY_SCROLLLOCK
+	case 72: return VK_INSERT;    // KEY_INSERT
+	case 73: return VK_DELETE;    // KEY_DELETE
+	case 74: return VK_HOME;      // KEY_HOME
+	case 75: return VK_END;       // KEY_END
+	case 76: return VK_PRIOR;     // KEY_PAGEUP
+	case 77: return VK_NEXT;      // KEY_PAGEDOWN
+	case 78: return VK_PAUSE;     // KEY_BREAK
+	case 79: return VK_LSHIFT;    // KEY_LSHIFT
+	case 80: return VK_RSHIFT;    // KEY_RSHIFT
+	case 81: return VK_LMENU;     // KEY_LALT
+	case 82: return VK_RMENU;     // KEY_RALT
+	case 83: return VK_LCONTROL;  // KEY_LCONTROL
+	case 84: return VK_RCONTROL;  // KEY_RCONTROL
+	case 85: return VK_LWIN;      // KEY_LWIN
+	case 86: return VK_RWIN;      // KEY_RWIN
+	case 87: return VK_APPS;      // KEY_APP
+	case 88: return VK_UP;        // KEY_UP
+	case 89: return VK_LEFT;      // KEY_LEFT
+	case 90: return VK_DOWN;      // KEY_DOWN
+	case 91: return VK_RIGHT;     // KEY_RIGHT
+	case 92: return VK_F1;        // KEY_F1
+	case 93: return VK_F2;        // KEY_F2
+	case 94: return VK_F3;        // KEY_F3
+	case 95: return VK_F4;        // KEY_F4
+	case 96: return VK_F5;        // KEY_F5
+	case 97: return VK_F6;        // KEY_F6
+	case 98: return VK_F7;        // KEY_F7
+	case 99: return VK_F8;        // KEY_F8
+	case 100: return VK_F9;       // KEY_F9
+	case 101: return VK_F10;      // KEY_F10
+	case 102: return VK_F11;      // KEY_F11
+	case 103: return VK_F12;      // KEY_F12
+	}
+	return 0;
 }
 
-static bool IsCommandPhysicallyHeld(const std::string& cmd)
+bool AnyWantsInputCapture()
 {
-	for (int vk : GetVKsForCommand(cmd.c_str()))
-	{
-		if (GetAsyncKeyState(vk) & 0x8000)
-			return true;
-	}
-	return false;
+	return g_Dispatcher.AnyWantsInputCapture();
 }
 
 void UpdateInputCaptureState()
@@ -194,13 +246,14 @@ void UpdateInputCaptureState()
 		s_bLastWantsCapture = anyWantsCapture;
 		if (anyWantsCapture)
 		{
-			// Build snapshot: only include commands that are physically held RIGHT NOW.
-			// Key_Event is not called on keyup by GoldSrc, so g_HeldCommands accumulates stale
-			// entries over time. GetAsyncKeyState at this exact moment is the only reliable filter.
+			// Build snapshot from g_KeyToCommand using keynum→VK→GetAsyncKeyState.
+			// This is fully bind-agnostic: we check the actual physical key stored during
+			// keydown tracking, not an assumed mapping from command string to key name.
 			g_PreCaptureCommands.clear();
-			for (const auto& cmd : g_HeldCommands)
+			for (const auto& [keynum, cmd] : g_KeyToCommand)
 			{
-				if (IsCommandPhysicallyHeld(cmd))
+				int vk = VKFromVguiKeyCode(keynum);
+				if (vk != 0 && (GetAsyncKeyState(vk) & 0x8000))
 					g_PreCaptureCommands.insert(cmd);
 			}
 			g_HeldCommands.clear();
