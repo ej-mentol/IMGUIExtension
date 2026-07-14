@@ -8,6 +8,7 @@
 
 extern std::set<std::string> g_HeldCommands;
 extern std::map<int, std::string> g_KeyToCommand;
+extern std::set<std::string> g_PreCaptureCommands;
 
 extern cl_exportfuncs_t gExportfuncs;
 extern cl_enginefunc_t gEngfuncs;

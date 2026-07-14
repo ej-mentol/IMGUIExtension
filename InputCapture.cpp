@@ -166,6 +166,12 @@ void UpdateInputCaptureState()
 		s_bLastWantsCapture = anyWantsCapture;
 		if (anyWantsCapture)
 		{
+			// Snapshot what was physically held at the moment of capture, then clear tracking.
+			// Clearing prevents stale entries from accumulating if keyup events were missed.
+			g_PreCaptureCommands = g_HeldCommands;
+			g_HeldCommands.clear();
+			g_KeyToCommand.clear();
+
 			if (g_pfnIN_DeactivateMouse)
 				g_pfnIN_DeactivateMouse();
 
@@ -192,8 +198,8 @@ void UpdateInputCaptureState()
 			int guard = 0;
 			while (ShowCursor(TRUE) < 0 && guard++ < 16) {}
 
-			gEngfuncs.Con_DPrintf("[IMGUIExtension] capture ON  (+%lldms since last), cursorPos=(%ld,%ld)\n",
-				(long long)sinceLastMs, pt.x, pt.y);
+			gEngfuncs.Con_DPrintf("[IMGUIExtension] capture ON  (+%lldms since last), cursorPos=(%ld,%ld), snapshot=%zu\n",
+				(long long)sinceLastMs, pt.x, pt.y, g_PreCaptureCommands.size());
 		}
 		else
 		{
@@ -217,13 +223,18 @@ void UpdateInputCaptureState()
 
 				if (gEngfuncs.pfnClientCmd)
 				{
-					for (const auto& cmd : g_HeldCommands)
+					// Restore only from the snapshot taken at capture ON, not the live set.
+					// The live set may contain keys pressed during menu navigation which are
+					// already in the correct state once the menu closes.
+					for (const auto& cmd : g_PreCaptureCommands)
 					{
 						gEngfuncs.Con_DPrintf("[IMGUIExtension] Restoring command: %s\n", cmd.c_str());
 						gEngfuncs.pfnClientCmd((char*)cmd.c_str());
 					}
 				}
 			}
+
+			g_PreCaptureCommands.clear();
 
 			gEngfuncs.Con_DPrintf("[IMGUIExtension] capture OFF (+%lldms since last), cursorPos=(%ld,%ld), restored=%d\n",
 				(long long)sinceLastMs, pt.x, pt.y, bShouldRestoreMouse);

@@ -25,6 +25,7 @@ float g_vRawDeltaX = 0.0f;
 float g_vRawDeltaY = 0.0f;
 std::set<std::string> g_HeldCommands;
 std::map<int, std::string> g_KeyToCommand;
+std::set<std::string> g_PreCaptureCommands;
 
 void HUD_Init(void)
 {
