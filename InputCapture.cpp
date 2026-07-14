@@ -235,6 +235,11 @@ void UpdateInputCaptureState()
 			}
 
 			g_PreCaptureCommands.clear();
+			// Discard any commands accumulated while the menu was open —
+			// those keypresses were blocked by SUPERCEDE and the engine never saw them,
+			// so they must not pollute the next capture ON snapshot.
+			g_HeldCommands.clear();
+			g_KeyToCommand.clear();
 
 			gEngfuncs.Con_DPrintf("[IMGUIExtension] capture OFF (+%lldms since last), cursorPos=(%ld,%ld), restored=%d\n",
 				(long long)sinceLastMs, pt.x, pt.y, bShouldRestoreMouse);
