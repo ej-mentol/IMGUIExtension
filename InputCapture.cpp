@@ -1,11 +1,5 @@
 #include <metahook.h>
 #include <chrono>
-#include <algorithm>
-#include <cctype>
-#include <vector>
-#include <fstream>
-#include <sstream>
-#include <map>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "thirdparty/imgui/imgui.h"
