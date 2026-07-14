@@ -47,8 +47,7 @@ public:
 	{
 		if (down == 0)
 		{
-			// Keyup event: GoldSrc does not pass pszCurrentBinding on keyup (it is nullptr/empty).
-			// We look up the keynum in our active mapping to find the corresponding command to release.
+			// On keyup, GoldSrc may not pass pszCurrentBinding — use keynum→command map to find what to release.
 			auto it = g_KeyToCommand.find(keynum);
 			if (it != g_KeyToCommand.end())
 			{
@@ -58,7 +57,9 @@ public:
 		}
 		else
 		{
-			// Keydown event: Register binding if it matches one of our movement/action controls.
+			// On keydown, record the physical key→command mapping unconditionally.
+			// The physical state of the key must be tracked regardless of whether ImGui has capture,
+			// so that restoration on capture OFF is accurate even if the key was pressed during menu open.
 			if (pszCurrentBinding)
 			{
 				std::string binding = pszCurrentBinding;
@@ -68,12 +69,8 @@ public:
 					binding == "+jump" || binding == "+duck" ||
 					binding == "+use")
 				{
-					// Only track if UI capture is not active to prevent menu interaction from locking movement.
-					if (!g_Dispatcher.AnyWantsInputCapture())
-					{
-						g_KeyToCommand[keynum] = binding;
-						g_HeldCommands.insert(binding);
-					}
+					g_KeyToCommand[keynum] = binding;
+					g_HeldCommands.insert(binding);
 				}
 			}
 		}
