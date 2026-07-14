@@ -26,6 +26,7 @@ extern float g_vRawDeltaY;
 
 // Forward declarations for exports
 int HUD_Redraw(float time, int intermission);
+int HUD_Key_Event(int down, int keynum, const char* pszCurrentBinding);
 void HUD_Shutdown(void);
 void IN_MouseEvent(int mstate);
 void IN_Accumulate(void);
