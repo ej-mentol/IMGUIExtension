@@ -67,7 +67,6 @@ static void GenerateConfigFromFolder(const char* szFontsDir, const char* szJsonP
 				continue;
 
 			std::string fn = findData.cFileName;
-			gEngfuncs.Con_DPrintf("[IMGUIExtension] Found file during scan: %s\n", fn.c_str());
 
 			size_t idx = fn.find_last_of('.');
 			if (idx != std::string::npos)
