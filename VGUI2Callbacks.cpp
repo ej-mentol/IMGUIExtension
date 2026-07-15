@@ -52,15 +52,18 @@ public:
 			{
 				return;
 			}
+			
+			// Skip empty bindings
+			if (!pszCurrentBinding)
+			{
+				return;
+			}
 
 			// Allow console toggle to pass through (general engine control)
-			if (pszCurrentBinding)
-			{
-				if (strstr(pszCurrentBinding, "toggleconsole") != nullptr)
+			if (strstr(pszCurrentBinding, "toggleconsole") != nullptr)
 				{
 					return;
 				}
-			}
 
 			// Check if any callback specifically allows this key to pass through
 			if (g_Dispatcher.AnyAllowsKeyPassthrough(keynum, pszCurrentBinding))
