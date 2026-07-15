@@ -24,6 +24,12 @@ The plugin solves several architecture-specific hurdles inherent to GoldSrc/Sven
 4. **Resolution Switch Safeguards**
    GoldSrc destroys and re-creates the OpenGL device context upon video mode changes or resolution switches. `IMGUIExtension` catches this during `BaseUI::Paint` and `HUD_VidInit`, tearing down old backends and re-initializing GL2/Win32 context states dynamically.
 
+5. **Robust Reentrant Dispatcher**
+   To safely host multiple independent consumer plugins, the core utilizes a highly resilient dispatch system (`CImGuiDispatcher`). It prevents common modding crashes through:
+   * **Zero-Iterator-Invalidation**: All callback iterations use safe index-based loops and a recursion depth counter instead of standard iterators.
+   * **Deferred Mutation Queues**: If a consumer plugin registers or unregisters itself (or other components) in the middle of a dispatch loop or an input event, the changes are safely queued and resolved afterward.
+   * **SEH Protection**: Consumer callback invocations and input checks are wrapped in Structured Exception Handling (`__try` / `__except`) blocks, ensuring a crash or null-pointer dereference in a client plugin does not crash the host extension or the game process.
+
 ---
 
 ## Project Build & Compilation
@@ -36,7 +42,9 @@ The plugin solves several architecture-specific hurdles inherent to GoldSrc/Sven
 ## Concurrency & Safety
 
 * **C++ Standard**: Compiled under C++20 (`stdcpp20`).
-* **Thread Safety**: Global callback registration states should leverage atomic operations or lock-free queue models if processed across multiple threads. Consumers must avoid long-running or blocking code in `OnImGuiFrame` callbacks to maintain consistent rendering frame times.
+* **Thread Model**: Single-threaded by design. All dispatcher state (`CImGuiDispatcher`), registration, and callback iteration run exclusively on the engine's main thread inside GoldSrc's hook points (`HUD_Init`, `BaseUI::Paint`, `IN_*`). There is no internal locking - consumers must not call `RegisterCallbacks`/`UnregisterCallbacks` or any `IImGuiExtension` method from a worker thread.
+* **Reentrancy & Mutation Safety**: The dispatcher explicitly supports *reentrant* calls and dynamic structural modifications. Registration/unregistration during active iteration at any depth is deferred to a queue and applied cleanly once the outermost execution loop unwinds.
+* Consumers must avoid long-running or blocking code in `OnImGuiFrame` callbacks to maintain consistent rendering frame times.
 
 ---
 
