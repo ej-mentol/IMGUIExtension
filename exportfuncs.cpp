@@ -17,26 +17,16 @@ int HUD_Redraw(float time, int intermission)
 	return g_pfnHUD_Redraw(time, intermission);
 }
 
-int HUD_Key_Event(int eventcode, int keynum, const char* pszCurrentBinding)
+void CL_CreateMove(float frametime, struct usercmd_s* cmd, int active)
 {
-	// GoldSrc calls this for every key event. eventcode: 0 = keyup, 1 = keydown.
-	// Track keydown bindings into g_KeyToCommand for the capture ON snapshot.
-	// Blocking is handled separately by VGUI2Callbacks — this hook is tracking only.
-	if (eventcode == 1 && pszCurrentBinding)
-	{
-		std::string binding = pszCurrentBinding;
-		if (binding == "+attack" || binding == "+attack2" ||
-			binding == "+forward" || binding == "+back" ||
-			binding == "+moveleft" || binding == "+moveright" ||
-			binding == "+jump" || binding == "+duck" ||
-			binding == "+use")
-		{
-			g_KeyToCommand[keynum] = binding;
-			g_HeldCommands.insert(binding);
-		}
-	}
+	// Record the current input buttons every frame.
+	// This is the authoritative source: the engine has already applied all bindings to cmd->buttons.
+	// We read it at capture ON to build the restore snapshot without any key-name assumptions.
+	if (cmd)
+		g_LastButtons = cmd->buttons;
 
-	return g_pfnHUD_Key_Event ? g_pfnHUD_Key_Event(eventcode, keynum, pszCurrentBinding) : 1;
+	if (g_pfnCL_CreateMove)
+		g_pfnCL_CreateMove(frametime, cmd, active);
 }
 
 void IN_MouseEvent(int mstate)

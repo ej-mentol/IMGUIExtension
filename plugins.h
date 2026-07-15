@@ -2,13 +2,13 @@
 
 #include <metahook.h>
 #include <string>
-#include <set>
-#include <map>
+#include <in_buttons.h>
+#include <usercmd.h>
 #include "IImGuiExtension.h"
 
-extern std::set<std::string> g_HeldCommands;
-extern std::map<int, std::string> g_KeyToCommand;
-extern std::set<std::string> g_PreCaptureCommands;
+// Tracks the buttons bitmask from the last CL_CreateMove call.
+// Used at capture ON to build the restore snapshot — fully bind-agnostic.
+extern unsigned short g_LastButtons;
 
 extern cl_exportfuncs_t gExportfuncs;
 extern cl_enginefunc_t gEngfuncs;
@@ -26,14 +26,14 @@ extern float g_vRawDeltaY;
 
 // Forward declarations for exports
 int HUD_Redraw(float time, int intermission);
-int HUD_Key_Event(int eventcode, int keynum, const char* pszCurrentBinding);
+void CL_CreateMove(float frametime, struct usercmd_s* cmd, int active);
 void HUD_Shutdown(void);
 void IN_MouseEvent(int mstate);
 void IN_Accumulate(void);
 
 // Hooked function pointers
 extern int (*g_pfnHUD_Redraw)(float time, int intermission);
-extern int (*g_pfnHUD_Key_Event)(int eventcode, int keynum, const char* pszCurrentBinding);
+extern void (*g_pfnCL_CreateMove)(float frametime, struct usercmd_s* cmd, int active);
 extern void (*g_pfnIN_MouseEvent)(int mstate);
 extern void (*g_pfnIN_Accumulate)(void);
 

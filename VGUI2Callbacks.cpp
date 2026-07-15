@@ -45,18 +45,6 @@ public:
 
 	void Key_Event(int& down, int& keynum, const char*& pszCurrentBinding, VGUI2Extension_CallbackContext* CallbackContext) override
 	{
-		if (down == 0)
-		{
-			// GoldSrc does not guarantee a valid pszCurrentBinding on keyup — the pointer may be dangling.
-			// Use the keynum->command map (populated by HUD_Key_Event) to find what to release.
-			auto it = g_KeyToCommand.find(keynum);
-			if (it != g_KeyToCommand.end())
-			{
-				g_HeldCommands.erase(it->second);
-				g_KeyToCommand.erase(it);
-			}
-		}
-
 		if (g_Dispatcher.AnyWantsInputCapture())
 		{
 			// Allow keyup events to pass through so the engine can process key releases

@@ -16,7 +16,7 @@ IFileSystem_HL25* g_pFileSystem_HL25 = nullptr;
 void (*g_pfnHUD_Init)(void) = nullptr;
 int  (*g_pfnHUD_VidInit)(void) = nullptr;
 int  (*g_pfnHUD_Redraw)(float time, int intermission) = nullptr;
-int  (*g_pfnHUD_Key_Event)(int eventcode, int keynum, const char* pszCurrentBinding) = nullptr;
+void (*g_pfnCL_CreateMove)(float frametime, struct usercmd_s* cmd, int active) = nullptr;
 void (*g_pfnIN_MouseEvent)(int mstate) = nullptr;
 void (*g_pfnIN_Accumulate)(void) = nullptr;
 
@@ -24,9 +24,7 @@ int glwidth = 0;
 int glheight = 0;
 float g_vRawDeltaX = 0.0f;
 float g_vRawDeltaY = 0.0f;
-std::set<std::string> g_HeldCommands;
-std::map<int, std::string> g_KeyToCommand;
-std::set<std::string> g_PreCaptureCommands;
+unsigned short g_LastButtons = 0;
 
 void HUD_Init(void)
 {
@@ -87,8 +85,8 @@ void IPluginsV4::LoadClient(cl_exportfuncs_t* pExportFunc)
 	g_pfnIN_Accumulate = pExportFunc->IN_Accumulate;
 	pExportFunc->IN_Accumulate = IN_Accumulate;
 
-	g_pfnHUD_Key_Event = pExportFunc->HUD_Key_Event;
-	pExportFunc->HUD_Key_Event = HUD_Key_Event;
+	g_pfnCL_CreateMove = pExportFunc->CL_CreateMove;
+	pExportFunc->CL_CreateMove = CL_CreateMove;
 
 	PrivateFuncs_Init();
 	IMGUI_VGUI2Extension_Init();
