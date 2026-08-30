@@ -64,9 +64,15 @@ static BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
 	return TRUE;
 }
 
+static HWND s_hGameWnd = NULL;
+
+void ResetGameHWND()
+{
+	s_hGameWnd = NULL;
+}
+
 HWND GetGameHWND()
 {
-	static HWND s_hGameWnd = NULL;
 	if (s_hGameWnd)
 		return s_hGameWnd;
 
@@ -342,6 +348,10 @@ void ImGui_Shutdown()
 void ImGui_VidReinit()
 {
 	if (!g_bImGuiInitialized) return;
+
+	// Reset cached HWND — engine may recreate the window on windowed↔fullscreen
+	// switches that require a different pixel format. Cost: one extra HWND lookup.
+	ResetGameHWND();
 
 	HWND hWnd = GetGameHWND();
 	if (hWnd && g_pfnOldWndProc)

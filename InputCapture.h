@@ -13,5 +13,6 @@ void ImGui_VidReinit();
 bool AnyWantsInputCapture();
 void UpdateInputCaptureState();
 HWND GetGameHWND();
+void ResetGameHWND();
 LRESULT CALLBACK ImGui_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 int GetDeveloperLevel();

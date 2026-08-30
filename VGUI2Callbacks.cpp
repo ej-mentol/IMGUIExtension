@@ -82,7 +82,9 @@ public:
 
 	void Paint(int& x, int& y, int& right, int& bottom, VGUI2Extension_CallbackContext* CallbackContext) override
 	{
-		static std::chrono::steady_clock::time_point s_LastFrameTime = std::chrono::steady_clock::now();
+		// Zero-initialized to epoch: first elapsed will be enormous, guaranteeing
+		// the first Paint call always passes the 500μs throttle.
+		static std::chrono::steady_clock::time_point s_LastFrameTime = {};
 
 		ImGui_InitOnce();
 		if (!g_bImGuiInitialized) return;
