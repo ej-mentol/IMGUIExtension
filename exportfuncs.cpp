@@ -14,7 +14,7 @@ IVGUI2Extension* g_pVGUI2Extension = nullptr;
 // Hooked Client Export Functions
 int HUD_Redraw(float time, int intermission)
 {
-	return g_pfnHUD_Redraw(time, intermission);
+	return g_pfnHUD_Redraw ? g_pfnHUD_Redraw(time, intermission) : 0;
 }
 
 void CL_CreateMove(float frametime, struct usercmd_s* cmd, int active)
@@ -36,7 +36,8 @@ void IN_MouseEvent(int mstate)
 		// Block mouse clicks from triggering engine/weapon events
 		return;
 	}
-	g_pfnIN_MouseEvent(mstate);
+	if (g_pfnIN_MouseEvent)
+		g_pfnIN_MouseEvent(mstate);
 }
 
 void IN_Accumulate(void)
@@ -59,6 +60,7 @@ void IN_Accumulate(void)
 	{
 		g_vRawDeltaX = 0.0f;
 		g_vRawDeltaY = 0.0f;
-		g_pfnIN_Accumulate();
+		if (g_pfnIN_Accumulate)
+			g_pfnIN_Accumulate();
 	}
 }

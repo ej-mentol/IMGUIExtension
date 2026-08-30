@@ -322,6 +322,7 @@ void ImGui_Shutdown()
 	if (!g_bImGuiInitialized) return;
 
 	HWND hWnd = GetGameHWND();
+	ResetGameHWND();
 	if (hWnd && g_pfnOldWndProc)
 	{
 		WNDPROC current = (WNDPROC)GetWindowLongPtr(hWnd, GWLP_WNDPROC);

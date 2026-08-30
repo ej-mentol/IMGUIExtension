@@ -2,6 +2,9 @@
 
 #include <vector>
 #include <algorithm>
+#define IMGUI_DEFINE_MATH_OPERATORS
+#include "thirdparty/imgui/imgui.h"
+#include "thirdparty/imgui/imgui_internal.h"
 #include "IImGuiExtension.h"
 #include "plugins.h"
 
@@ -45,7 +48,6 @@ public:
 
 		m_Callbacks.clear();
 		m_PendingAdditions.clear();
-		m_PendingShutdowns.clear();
 		m_bInitialized = false;
 		m_bStarted = false;
 		m_pEngineFuncs = nullptr;
@@ -81,28 +83,26 @@ public:
 
 		if (m_IterationDepth > 0)
 		{
-			bool wasActive = false;
+			// Reentrant path (called from within WantsInputCapture, AllowKeyPassthrough, etc.)
+			// Call Shutdown() immediately before nulling the slot — the caller may destroy
+			// itself right after Unregister() returns, so deferring Shutdown() to
+			// ProcessPending() would be a use-after-free on the next Dispatch() call.
+			// Index-based iteration + deferred structural changes make this safe.
 			for (size_t i = 0; i < m_Callbacks.size(); ++i)
 			{
 				if (m_Callbacks[i] == cb)
 				{
+					cb->Shutdown();
 					m_Callbacks[i] = nullptr;
-					wasActive = true;
 				}
 			}
-			
-			// Remove from pending additions if it got stuck there
+
+			// Remove from pending additions if it never made it into the main list
 			auto itAdd = std::find(m_PendingAdditions.begin(), m_PendingAdditions.end(), cb);
 			if (itAdd != m_PendingAdditions.end())
 				m_PendingAdditions.erase(itAdd);
 
-			if (wasActive)
-			{
-				if (std::find(m_PendingShutdowns.begin(), m_PendingShutdowns.end(), cb) == m_PendingShutdowns.end())
-				{
-					m_PendingShutdowns.push_back(cb);
-				}
-			}
+			// Do NOT add to m_PendingShutdowns — Shutdown() was already called above.
 			return;
 		}
 
@@ -166,6 +166,9 @@ public:
 	template<typename Func>
 	static void SafeInvoke(IImGuiExtensionCallbacks* cb, Func&& func)
 	{
+		ImGuiContext* ctx = ImGui::GetCurrentContext();
+		const int savedWindowStackSize = ctx ? ctx->CurrentWindowStack.Size : 0;
+
 		__try
 		{
 			func(cb);
@@ -174,6 +177,15 @@ public:
 		{
 			gEngfuncs.Con_Printf("[IMGUIExtension] Crash caught in consumer callback: %s (code 0x%08X)\n",
 				cb->GetModuleName(), GetExceptionCode());
+
+			// Restore ImGui window stack — if the callback crashed inside Begin() without
+			// a matching End(), CurrentWindowStack is imbalanced. The next callback would
+			// inherit corrupted state: IM_ASSERT in Debug, silent memory corruption in Release.
+			if (ctx)
+			{
+				while (ctx->CurrentWindowStack.Size > savedWindowStackSize)
+					ImGui::End();
+			}
 		}
 	}
 
@@ -217,20 +229,7 @@ private:
 			m_Callbacks.erase(newEnd, m_Callbacks.end());
 		}
 
-		// 2. Process deferred shutdowns
-		if (!m_PendingShutdowns.empty())
-		{
-			// Copy the queue to iterate safely in case Shutdown() appends more elements
-			auto pending = m_PendingShutdowns;
-			m_PendingShutdowns.clear();
-			
-			for (size_t i = 0; i < pending.size(); ++i)
-			{
-				if (pending[i]) pending[i]->Shutdown();
-			}
-		}
-
-		// 3. Process deferred additions
+		// 2. Process deferred additions
 		if (!m_PendingAdditions.empty())
 		{
 			auto pending = m_PendingAdditions;
@@ -268,7 +267,6 @@ private:
 
 	std::vector<IImGuiExtensionCallbacks*> m_Callbacks;
 	std::vector<IImGuiExtensionCallbacks*> m_PendingAdditions;
-	std::vector<IImGuiExtensionCallbacks*> m_PendingShutdowns;
 	int m_IterationDepth = 0;
 
 	// State tracking
