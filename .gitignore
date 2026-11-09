@@ -1,24 +1,24 @@
-# MSBuild / Visual Studio output and cache directories
-**/[Dd]ebug/
-**/[Rr]elease/
-**/[Rr]elease_AVX2/
-**/.vs/
+# Build and install trees (a standalone build keeps every artifact in this directory)
+/build/
+/install/
 
-# User-specific project settings (preserves local debug paths)
-**/*.vcxproj.user
+# Generated from the shared FormatValidation source during CMake configuration
+/.clang-format
 
-# Visual Studio / compiler database and cache
+# Editor / IDE state
+.vs/
+*.user
 **/*.VC.db
 **/*.ipch
 **/*.aps
 
-# Intermediate compilation and linker files
-**/*.obj
-**/*.pdb
-**/*.iobj
-**/*.ipdb
-**/*.tlog
-**/*.recipe
-**/*.log
-**/*.idb
-**/*.ilk
+# Compiler and linker intermediates (safety net for stray files)
+*.obj
+*.pdb
+*.iobj
+*.ipdb
+*.tlog
+*.recipe
+*.log
+*.idb
+*.ilk
