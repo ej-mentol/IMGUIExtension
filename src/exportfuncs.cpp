@@ -52,9 +52,9 @@ void IN_Accumulate(void)
 			g_vRawDeltaY = (float)ry;
 		}
 
-		// While any consumer wants input capture, we intentionally skip the engine's own
-		// IN_Accumulate to avoid its internal mouse re-centering behavior fighting with
-		// ImGui. See README § Known Issues — root cause on the engine side not fully isolated.
+		// While any consumer wants input capture, the engine's own IN_Accumulate is
+		// skipped so its mouse re-centering cannot fight ImGui's cursor. The exact
+		// engine-side interaction is not fully isolated; see README "Known limitations".
 	}
 	else
 	{

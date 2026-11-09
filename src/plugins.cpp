@@ -28,7 +28,9 @@ unsigned short g_LastButtons = 0;
 
 void HUD_Init(void)
 {
-	g_pfnHUD_Init();
+	if (g_pfnHUD_Init)
+		g_pfnHUD_Init();
+
 	g_Dispatcher.Start(&gEngfuncs, METAHOOK_API_VERSION);
 }
 
@@ -48,20 +50,31 @@ void IPluginsV4::Init(metahook_api_t* pAPI, mh_interface_t* pIface, mh_enginesav
 	g_pInterface   = pIface;
 	g_pMetaSave    = pSave;
 
-	// Initialize filesystem pointers — same pattern as BulletPhysics/plugins.cpp
-	g_pFileSystem = pIface->FileSystem;
-	if (!g_pFileSystem)
-		g_pFileSystem_HL25 = pIface->FileSystem_HL25;
+	// Filesystem pointers follow the host contract: the HL25 interface is only
+	// available on newer engines and replaces the legacy one through the
+	// FILESYSTEM_ANY_* helpers.
+	if (pIface)
+	{
+		g_pFileSystem = pIface->FileSystem;
+		if (!g_pFileSystem)
+			g_pFileSystem_HL25 = pIface->FileSystem_HL25;
+	}
 }
 
 void IPluginsV4::Shutdown(void)
 {
 	g_Dispatcher.Shutdown();
 	IMGUI_VGUI2Extension_Shutdown();
+	// Also tear down the backends here: a DLL unload is not guaranteed to be
+	// preceded by ExitGame, and both functions are idempotent.
+	ImGui_Shutdown();
 }
 
 void IPluginsV4::LoadEngine(cl_enginefunc_t* pEngfuncs)
 {
+	if (!pEngfuncs)
+		return;
+
 	memcpy(&gEngfuncs, pEngfuncs, sizeof(gEngfuncs));
 }
 

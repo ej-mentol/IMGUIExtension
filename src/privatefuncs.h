@@ -6,7 +6,9 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_syswm.h>
 
-typedef int (*pfnSDL_GetRelativeMouseState)(int* x, int* y);
+// SDL2.dll is resolved at runtime; the headers are only needed for the ABI-compatible
+// types below. SDL is never linked.
+typedef Uint32 (*pfnSDL_GetRelativeMouseState)(int* x, int* y);
 
 extern pfnSDL_GetRelativeMouseState g_pfnSDL_GetRelativeMouseState;
 
