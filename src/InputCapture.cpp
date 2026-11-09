@@ -1,13 +1,15 @@
 #include <metahook.h>
-#include <chrono>
+#include <cstdarg>
+#include <cstdio>
+#include <string>
+#include <vector>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
-#include "thirdparty/imgui/imgui.h"
-#include "thirdparty/imgui/imgui_internal.h"
-#include "thirdparty/imgui/backends/imgui_impl_win32.h"
-#include "thirdparty/imgui/backends/imgui_impl_opengl2.h"
+#include <imgui.h>
+#include <imgui_internal.h>
+#include <imgui_impl_win32.h>
+#include <imgui_impl_opengl2.h>
 
-#include <cvardef.h>
 #include "plugins.h"
 #include "privatefuncs.h"
 #include "exportfuncs.h"
@@ -20,13 +22,15 @@ ImGuiContext* g_pImGuiContext = nullptr;
 bool g_bImGuiInitialized = false;
 bool g_bImGuiFrameReady = false;
 // Set to true because when the DLL loads, GoldSrc/Sven is starting up and the Main Menu (GameUI) is active.
-// Also acts as a safety default during hot-reloads (vid_restart) to prevent capturing the mouse 
+// Also acts as a safety default during hot-reloads (vid_restart) to prevent capturing the mouse
 // before callbacks (ActivateGameUI/LoadingStarted) sync the state.
 bool s_bGameUIActive = true;
 
+// True once the context has its ini path and font atlas; backends can come and go
+// (video mode changes) without re-creating the context, so consumers keep the
+// ImGuiContext pointer they obtained from IImGuiExtension::GetImGuiContext().
+static bool s_bContextConfigured = false;
 static bool s_bLastWantsCapture = false;
-static std::chrono::steady_clock::time_point s_LastCaptureTransition = std::chrono::steady_clock::now();
-static int s_iCaptureTransitionCount = 0;
 static WNDPROC g_pfnOldWndProc = nullptr;
 static char s_szIniPath[MAX_PATH] = {};
 
@@ -39,7 +43,24 @@ int GetDeveloperLevel()
 	return 0;
 }
 
-struct FindWindowData {
+// Transition diagnostics are only useful while debugging capture problems; keep
+// them behind developer > 1 so a normal session produces no console noise.
+// Con_DPrintf is also only valid after LoadEngine.
+static void LogVerbose(const char* fmt, ...)
+{
+	if (GetDeveloperLevel() <= 1 || !gEngfuncs.Con_DPrintf)
+		return;
+
+	char msg[256];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(msg, sizeof(msg), fmt, args);
+	va_end(args);
+	gEngfuncs.Con_DPrintf("%s", msg);
+}
+
+struct FindWindowData
+{
 	DWORD processId;
 	HWND hWnd;
 };
@@ -73,6 +94,8 @@ void ResetGameHWND()
 
 HWND GetGameHWND()
 {
+	if (s_hGameWnd && !IsWindow(s_hGameWnd))
+		s_hGameWnd = NULL;
 	if (s_hGameWnd)
 		return s_hGameWnd;
 
@@ -107,7 +130,10 @@ HWND GetGameHWND()
 		return s_hGameWnd;
 	}
 
-	return GetForegroundWindow();
+	// Deliberately no GetForegroundWindow() fallback: subclassing whatever window
+	// happens to be active (another process) would swallow that application's input.
+	// Callers retry on the next frame instead.
+	return nullptr;
 }
 
 LRESULT CALLBACK ImGui_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -116,17 +142,20 @@ LRESULT CALLBACK ImGui_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 	{
 		ImGui::SetCurrentContext(g_pImGuiContext);
 
+		// Query once per message: the dispatcher walks every consumer callback.
+		const bool bWantsInputCapture = g_Dispatcher.AnyWantsInputCapture();
+
 		// Pass to ImGui Win32 handler
 		if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp))
 		{
-			if (g_Dispatcher.AnyWantsInputCapture())
+			if (bWantsInputCapture)
 			{
 				return 1; // Supercede
 			}
 		}
 
 		// Also block game inputs when ImGui wants capture
-		if (g_Dispatcher.AnyWantsInputCapture())
+		if (bWantsInputCapture)
 		{
 			switch (msg)
 			{
@@ -148,8 +177,6 @@ LRESULT CALLBACK ImGui_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 	}
 	return DefWindowProc(hwnd, msg, wp, lp);
 }
-
-
 
 bool AnyWantsInputCapture()
 {
@@ -181,14 +208,6 @@ void UpdateInputCaptureState()
 	bool anyWantsCapture = g_Dispatcher.AnyWantsInputCapture();
 	if (anyWantsCapture != s_bLastWantsCapture)
 	{
-		auto now = std::chrono::steady_clock::now();
-		auto sinceLastMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - s_LastCaptureTransition).count();
-		s_LastCaptureTransition = now;
-		s_iCaptureTransitionCount++;
-
-		POINT pt = {};
-		GetCursorPos(&pt);
-
 		s_bLastWantsCapture = anyWantsCapture;
 		if (anyWantsCapture)
 		{
@@ -211,15 +230,14 @@ void UpdateInputCaptureState()
 
 			if (gEngfuncs.pfnClientCmd)
 			{
-				gEngfuncs.pfnClientCmd((char*)"-attack");
-				gEngfuncs.pfnClientCmd((char*)"-attack2");
-				gEngfuncs.pfnClientCmd((char*)"-forward");
-				gEngfuncs.pfnClientCmd((char*)"-back");
-				gEngfuncs.pfnClientCmd((char*)"-moveleft");
-				gEngfuncs.pfnClientCmd((char*)"-moveright");
-				gEngfuncs.pfnClientCmd((char*)"-jump");
-				gEngfuncs.pfnClientCmd((char*)"-duck");
-				gEngfuncs.pfnClientCmd((char*)"-use");
+				// Release every action the engine may still hold. The table above is
+				// the canonical button -> command mapping, so this cannot drift from it.
+				for (const auto& mapping : s_ButtonToCmds)
+				{
+					std::string release = "-";
+					release += mapping.cmd + 1; // mapping.cmd is "+name"
+					gEngfuncs.pfnClientCmd(release.data());
+				}
 			}
 
 			if (g_pfnSDL_SetRelativeMouseMode)
@@ -229,8 +247,7 @@ void UpdateInputCaptureState()
 			int guard = 0;
 			while (ShowCursor(TRUE) < 0 && guard++ < 16) {}
 
-			gEngfuncs.Con_DPrintf("[IMGUIExtension] capture ON  (+%lldms since last), cursorPos=(%ld,%ld), snapshot=%zu\n",
-				(long long)sinceLastMs, pt.x, pt.y, s_PreCaptureCommands.size());
+			LogVerbose("[IMGUIExtension] capture ON (held actions: %zu)\n", s_PreCaptureCommands.size());
 		}
 		else
 		{
@@ -258,19 +275,50 @@ void UpdateInputCaptureState()
 					// The live set may contain keys pressed during menu navigation which are
 					// already in the correct state once the menu closes.
 					for (const auto& cmd : s_PreCaptureCommands)
-					{
-						gEngfuncs.Con_DPrintf("[IMGUIExtension] Restoring command: %s\n", cmd.c_str());
 						gEngfuncs.pfnClientCmd((char*)cmd.c_str());
-					}
 				}
 			}
 
 			s_PreCaptureCommands.clear();
 
-			gEngfuncs.Con_DPrintf("[IMGUIExtension] capture OFF (+%lldms since last), cursorPos=(%ld,%ld), restored=%d\n",
-				(long long)sinceLastMs, pt.x, pt.y, bShouldRestoreMouse);
+			LogVerbose("[IMGUIExtension] capture OFF (restored=%d)\n", bShouldRestoreMouse ? 1 : 0);
 		}
 	}
+}
+
+static bool ConfigureImGuiContext()
+{
+	if (!g_pImGuiContext)
+	{
+		g_pImGuiContext = ImGui::CreateContext();
+		if (!g_pImGuiContext)
+			return false;
+	}
+	ImGui::SetCurrentContext(g_pImGuiContext);
+
+	if (s_bContextConfigured)
+		return true;
+
+	if (g_pFileSystem || g_pFileSystem_HL25)
+	{
+		FILESYSTEM_ANY_CREATEDIR("imguiextension", "GAME");
+		FILESYSTEM_ANY_CREATEDIR("imguiextension/fonts", "GAME");
+		if (!FILESYSTEM_ANY_GETLOCALPATH("imguiextension/imgui.ini", s_szIniPath, sizeof(s_szIniPath)))
+		{
+			const char* pszGameDir = g_pMetaHookAPI ? g_pMetaHookAPI->GetGameDirectory() : nullptr;
+			if (pszGameDir)
+				snprintf(s_szIniPath, sizeof(s_szIniPath), "%s/imguiextension/imgui.ini", pszGameDir);
+		}
+	}
+
+	for (char* p = s_szIniPath; *p; ++p)
+		if (*p == '\\') *p = '/';
+	if (s_szIniPath[0])
+		ImGui::GetIO().IniFilename = s_szIniPath;
+
+	LoadFontsFromConfig();
+	s_bContextConfigured = true;
+	return true;
 }
 
 void ImGui_InitOnce()
@@ -280,61 +328,57 @@ void ImGui_InitOnce()
 	HWND hWnd = GetGameHWND();
 	if (!hWnd) return;
 
-	g_pImGuiContext = ImGui::CreateContext();
-	ImGui::SetCurrentContext(g_pImGuiContext);
+	if (!ConfigureImGuiContext())
+		return;
 
-	FILESYSTEM_ANY_CREATEDIR("imguiextension", "GAME");
-	FILESYSTEM_ANY_CREATEDIR("imguiextension/fonts", "GAME");
-	if (!FILESYSTEM_ANY_GETLOCALPATH("imguiextension/imgui.ini", s_szIniPath, sizeof(s_szIniPath)))
-	{
-		std::string gameDir = g_pMetaHookAPI->GetGameDirectory();
-		sprintf(s_szIniPath, "%s/imguiextension/imgui.ini", gameDir.c_str());
-	}
-	for (char* p = s_szIniPath; *p; ++p)
-		if (*p == '\\') *p = '/';
-	ImGui::GetIO().IniFilename = s_szIniPath;
+	if (!ImGui_ImplWin32_Init(hWnd))
+		return;
 
-	LoadFontsFromConfig();
+	if (!ImGui_ImplOpenGL2_Init())
+	{
+		ImGui_ImplWin32_Shutdown();
+		return;
+	}
 
-	if (ImGui_ImplWin32_Init(hWnd))
+	SetLastError(0);
+	WNDPROC pfnOldWndProc = (WNDPROC)SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)ImGui_WndProc);
+	if (!pfnOldWndProc && GetLastError() != 0)
 	{
-		if (ImGui_ImplOpenGL2_Init())
-		{
-			g_pfnOldWndProc = (WNDPROC)SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)ImGui_WndProc);
-			g_bImGuiInitialized = true;
-		}
-		else
-		{
-			ImGui_ImplWin32_Shutdown();
-			ImGui::DestroyContext(g_pImGuiContext);
-			g_pImGuiContext = nullptr;
-		}
+		// Without the subclass the dispatcher would still build frames but no
+		// consumer would receive input; roll back and retry on the next frame.
+		ImGui_ImplOpenGL2_Shutdown();
+		ImGui_ImplWin32_Shutdown();
+		return;
 	}
-	else
-	{
-		ImGui::DestroyContext(g_pImGuiContext);
-		g_pImGuiContext = nullptr;
-	}
+
+	g_pfnOldWndProc = pfnOldWndProc;
+	g_bImGuiInitialized = true;
 }
 
 void ImGui_Shutdown()
 {
-	if (!g_bImGuiInitialized) return;
-
-	HWND hWnd = GetGameHWND();
-	ResetGameHWND();
-	if (hWnd && g_pfnOldWndProc)
+	if (g_pfnOldWndProc)
 	{
-		WNDPROC current = (WNDPROC)GetWindowLongPtr(hWnd, GWLP_WNDPROC);
-		if (current == ImGui_WndProc)
+		HWND hWnd = GetGameHWND();
+		if (hWnd)
 		{
-			SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)g_pfnOldWndProc);
+			WNDPROC current = (WNDPROC)GetWindowLongPtr(hWnd, GWLP_WNDPROC);
+			if (current == ImGui_WndProc)
+			{
+				SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)g_pfnOldWndProc);
+			}
 		}
 		g_pfnOldWndProc = nullptr;
 	}
+	ResetGameHWND();
 
-	ImGui_ImplOpenGL2_Shutdown();
-	ImGui_ImplWin32_Shutdown();
+	if (g_bImGuiInitialized)
+	{
+		ImGui_ImplOpenGL2_Shutdown();
+		ImGui_ImplWin32_Shutdown();
+	}
+	g_bImGuiInitialized = false;
+	g_bImGuiFrameReady = false;
 
 	if (g_pImGuiContext)
 	{
@@ -342,16 +386,18 @@ void ImGui_Shutdown()
 		g_pImGuiContext = nullptr;
 	}
 
-	g_bImGuiInitialized = false;
-	g_bImGuiFrameReady = false;
+	s_bContextConfigured = false;
+	s_szIniPath[0] = 0;
 }
 
 void ImGui_VidReinit()
 {
 	if (!g_bImGuiInitialized) return;
 
-	// Reset cached HWND — engine may recreate the window on windowed↔fullscreen
-	// switches that require a different pixel format. Cost: one extra HWND lookup.
+	// The engine may destroy and re-create both the window and the OpenGL context
+	// on a video mode change, so re-resolve the window, restore the subclass and
+	// rebuild both backends. The ImGui context itself is kept: consumers cache the
+	// pointer returned by GetImGuiContext().
 	ResetGameHWND();
 
 	HWND hWnd = GetGameHWND();
@@ -362,28 +408,16 @@ void ImGui_VidReinit()
 		{
 			SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)g_pfnOldWndProc);
 		}
-		g_pfnOldWndProc = nullptr;
 	}
+	g_pfnOldWndProc = nullptr;
+
+	// A frame that was begun but not rendered references GL objects that the old
+	// context owned; discard it instead of rendering stale draw data.
+	g_bImGuiFrameReady = false;
 
 	ImGui_ImplOpenGL2_Shutdown();
 	ImGui_ImplWin32_Shutdown();
+	g_bImGuiInitialized = false;
 
-	if (ImGui_ImplWin32_Init(hWnd))
-	{
-		if (ImGui_ImplOpenGL2_Init())
-		{
-			g_pfnOldWndProc = (WNDPROC)SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)ImGui_WndProc);
-		}
-		else
-		{
-			ImGui_ImplWin32_Shutdown();
-			g_bImGuiInitialized = false;
-			g_bImGuiFrameReady = false;
-		}
-	}
-	else
-	{
-		g_bImGuiInitialized = false;
-		g_bImGuiFrameReady = false;
-	}
+	// Backends are rebuilt lazily by ImGui_InitOnce() during the next Paint call.
 }

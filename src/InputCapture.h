@@ -1,6 +1,9 @@
 #pragma once
+
 #include <windows.h>
-#include "thirdparty/imgui/imgui.h"
+
+#define IMGUI_DEFINE_MATH_OPERATORS
+#include <imgui.h>
 
 extern ImGuiContext* g_pImGuiContext;
 extern bool g_bImGuiInitialized;
