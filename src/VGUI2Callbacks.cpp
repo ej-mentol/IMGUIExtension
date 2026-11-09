@@ -1,11 +1,12 @@
 #include <metahook.h>
 #include <chrono>
+#include <string>
 
 #define IMGUI_DEFINE_MATH_OPERATORS
-#include "thirdparty/imgui/imgui.h"
-#include "thirdparty/imgui/imgui_internal.h"
-#include "thirdparty/imgui/backends/imgui_impl_win32.h"
-#include "thirdparty/imgui/backends/imgui_impl_opengl2.h"
+#include <imgui.h>
+#include <imgui_internal.h>
+#include <imgui_impl_win32.h>
+#include <imgui_impl_opengl2.h>
 
 #include <Interface/IVGUI2Extension.h>
 
@@ -14,22 +15,24 @@
 #include "InputCapture.h"
 #include "VGUI2Callbacks.h"
 
+// The engine's console toggle command. Match by binding name because the key
+// itself is user-rebindable and no key number is guaranteed here.
+static constexpr const char kConsoleCommand[] = "toggleconsole";
+
 // Callback classes bridged from VGUI2Extension
 class CImGuiGameConsoleCallbacks : public IVGUI2Extension_GameConsoleCallbacks
 {
 public:
 	int GetAltitude() const override { return 1000; }
 
-	void Activate(VGUI2Extension_CallbackContext* CallbackContext) override { m_bConsoleVisible = true; }
+	void Activate(VGUI2Extension_CallbackContext* CallbackContext) override {}
 	void Initialize(VGUI2Extension_CallbackContext* CallbackContext) override {}
-	void Hide(VGUI2Extension_CallbackContext* CallbackContext) override { m_bConsoleVisible = false; }
+	void Hide(VGUI2Extension_CallbackContext* CallbackContext) override {}
 	void Clear(VGUI2Extension_CallbackContext* CallbackContext) override {}
 	void IsConsoleVisible(VGUI2Extension_CallbackContext* CallbackContext) override {}
 	void Printf(IVGUI2Extension_String* str, VGUI2Extension_CallbackContext* CallbackContext) override {}
 	void DPrintf(IVGUI2Extension_String* str, VGUI2Extension_CallbackContext* CallbackContext) override {}
 	void SetParent(vgui::VPANEL parent, VGUI2Extension_CallbackContext* CallbackContext) override {}
-
-	bool m_bConsoleVisible = false;
 };
 
 static CImGuiGameConsoleCallbacks s_ConsoleCallbacks;
@@ -45,35 +48,34 @@ public:
 
 	void Key_Event(int& down, int& keynum, const char*& pszCurrentBinding, VGUI2Extension_CallbackContext* CallbackContext) override
 	{
-		if (g_Dispatcher.AnyWantsInputCapture())
-		{
-			// Allow keyup events to pass through so the engine can process key releases
-			if (down == 0)
-			{
-				return;
-			}
-			
-			// Skip empty bindings
-			if (!pszCurrentBinding)
-			{
-				return;
-			}
+		if (!g_Dispatcher.AnyWantsInputCapture())
+			return;
 
-			// Allow console toggle to pass through (general engine control)
-			if (strstr(pszCurrentBinding, "toggleconsole") != nullptr)
-				{
-					return;
-				}
+		// GoldSrc may pass a null or dangling binding pointer on keyup. Never
+		// dereference it on release; the event must pass so the engine can clear
+		// held commands.
+		if (down == 0)
+			return;
 
-			// Check if any callback specifically allows this key to pass through
-			if (g_Dispatcher.AnyAllowsKeyPassthrough(keynum, pszCurrentBinding))
-			{
-				return;
-			}
+		// An unbound key has no command to suppress.
+		if (!pszCurrentBinding)
+			return;
 
-			// Block key event in the engine if ImGui wants capture
-			CallbackContext->Result = VGUI2Extension_Result::SUPERCEDE;
-		}
+		// Keep a stable copy for this event: the engine-owned binding string may be
+		// invalidated by anything that rebinds while the consumer callbacks run, and
+		// consumers only keep the pointer for the duration of the call.
+		const std::string binding = pszCurrentBinding;
+
+		// Console access must survive any capture, whichever key the user bound.
+		if (binding.find(kConsoleCommand) != std::string::npos)
+			return;
+
+		// keynum is forwarded verbatim (engine key number, not a Windows VK code).
+		if (g_Dispatcher.AnyAllowsKeyPassthrough(keynum, binding.c_str()))
+			return;
+
+		// Block the key in the engine while ImGui owns the keyboard.
+		CallbackContext->Result = VGUI2Extension_Result::SUPERCEDE;
 	}
 
 	void CallEngineSurfaceAppProc(void*& pevent, void*& userData, VGUI2Extension_CallbackContext* CallbackContext) override {}
@@ -100,6 +102,8 @@ public:
 			{
 				s_LastFrameTime = now;
 
+				// The Win32 backend owns io.DisplaySize (it reads the client rect in
+				// NewFrame); these values are only used for the diagnostic log line.
 				HWND hWnd = GetGameHWND();
 				RECT rc = { 0 };
 				if (hWnd && GetClientRect(hWnd, &rc))
@@ -115,26 +119,33 @@ public:
 
 				if (glwidth > 0 && glheight > 0)
 				{
-					auto& io = ImGui::GetIO();
-					io.DisplaySize = ImVec2((float)glwidth, (float)glheight);
-
-					static int s_lastLogWidth = 0;
-					static int s_lastLogHeight = 0;
-					if (glwidth != s_lastLogWidth || glheight != s_lastLogHeight)
+					if (GetDeveloperLevel() > 1)
 					{
-						s_lastLogWidth = glwidth;
-						s_lastLogHeight = glheight;
-						gEngfuncs.Con_DPrintf("[IMGUIExtension] Paint Resolution: %dx%d (VGUI: x=%d y=%d r=%d b=%d, hWnd=%p)\n",
-							glwidth, glheight, x, y, right, bottom, hWnd);
+						static int s_lastLogWidth = 0;
+						static int s_lastLogHeight = 0;
+						if (glwidth != s_lastLogWidth || glheight != s_lastLogHeight)
+						{
+							s_lastLogWidth = glwidth;
+							s_lastLogHeight = glheight;
+							gEngfuncs.Con_DPrintf("[IMGUIExtension] display %dx%d\n", glwidth, glheight);
+						}
 					}
 
 					UpdateInputCaptureState();
+
+					// A previous frame was begun but never rendered (the post-Paint call
+					// was skipped). End it first: NewFrame asserts otherwise.
+					if (g_bImGuiFrameReady)
+					{
+						ImGui::EndFrame();
+						g_bImGuiFrameReady = false;
+					}
 
 					ImGui_ImplWin32_NewFrame();
 					ImGui_ImplOpenGL2_NewFrame();
 					ImGui::NewFrame();
 
-					io.MouseDrawCursor = false; // Always use hardware OS cursor
+					ImGui::GetIO().MouseDrawCursor = false; // Always use hardware OS cursor
 
 					g_Dispatcher.Dispatch([&](IImGuiExtensionCallbacks* cb) {
 						ImGui::SetCurrentContext(g_pImGuiContext);
@@ -149,6 +160,7 @@ public:
 		{
 			if (g_bImGuiFrameReady)
 			{
+				ImGui::SetCurrentContext(g_pImGuiContext);
 				ImGui::Render();
 				ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
 				g_bImGuiFrameReady = false;
@@ -231,7 +243,13 @@ static CImGuiGameUICallbacks s_GameUICallbacks;
 
 void IMGUI_VGUI2Extension_Init(void)
 {
-	auto hVGUI2Extension = g_pMetaHookAPI->GetPluginModuleHandleByBaseFileName("VGUI2Extension");
+	if (g_pVGUI2Extension)
+		return;
+
+	HINTERFACEMODULE hVGUI2Extension = nullptr;
+	if (g_pMetaHookAPI)
+		hVGUI2Extension = g_pMetaHookAPI->GetPluginModuleHandleByBaseFileName("VGUI2Extension");
+
 	if (hVGUI2Extension)
 	{
 		auto factory = Sys_GetFactory(hVGUI2Extension);
@@ -255,10 +273,13 @@ void IMGUI_VGUI2Extension_Init(void)
 
 void IMGUI_VGUI2Extension_Shutdown(void)
 {
-	if (g_pVGUI2Extension)
-	{
-		g_pVGUI2Extension->UnregisterBaseUICallbacks(&s_BaseUICallbacks);
-		g_pVGUI2Extension->UnregisterGameUICallbacks(&s_GameUICallbacks);
-		g_pVGUI2Extension->UnregisterGameConsoleCallbacks(&s_ConsoleCallbacks);
-	}
+	if (!g_pVGUI2Extension)
+		return;
+
+	g_pVGUI2Extension->UnregisterBaseUICallbacks(&s_BaseUICallbacks);
+	g_pVGUI2Extension->UnregisterGameUICallbacks(&s_GameUICallbacks);
+	g_pVGUI2Extension->UnregisterGameConsoleCallbacks(&s_ConsoleCallbacks);
+	// Both Shutdown and ExitGame call this; nulling the pointer makes it idempotent
+	// and stops later callbacks from using a torn-down VGUI2Extension.
+	g_pVGUI2Extension = nullptr;
 }
