@@ -32,12 +32,22 @@ public:
 	// The arbiter will automatically suppress game mouse look/keys if any plugin wants input capture.
 	virtual bool WantsInputCapture() const = 0;
 
-	// Return true if this module allows this specific key to pass through to the engine even when WantsInputCapture() is true.
-	// Defaults to allowing the console tilde key (VK_OEM_3 = 192) to prevent locking players out of the game console.
+	// Return true if this module allows this specific key to pass through to the engine
+	// even when WantsInputCapture() is true.
+	//
+	// keynum is the key number forwarded verbatim by VGUI2Extension's Key_Event. It is
+	// NOT a Windows VK_* code (the engine key-number domain is documented in HLSDK
+	// keydefs.h: printable keys are lowercased ASCII, special keys start at 0x80).
+	// pszCurrentBinding is never null and is only valid for the current keydown; the
+	// host does not invoke this callback for keyup events.
+	//
+	// Unbound keys are not captured at all, and the host already passes through any
+	// binding that contains "toggleconsole", so returning false here cannot lock the
+	// player out of the console. Keep this callback for UI-specific keys only.
 	virtual bool AllowKeyPassthrough(int keynum, const char* pszCurrentBinding) const
 	{
-		if (keynum == VK_OEM_3) // '`~' tilde key — opens game console
-			return true;
+		(void)keynum;
+		(void)pszCurrentBinding;
 		return false;
 	}
 
@@ -51,6 +61,12 @@ class IImGuiExtension : public IBaseInterface
 public:
 	virtual void RegisterCallbacks(IImGuiExtensionCallbacks* cb) = 0;
 	virtual void UnregisterCallbacks(IImGuiExtensionCallbacks* cb) = 0;
+
+	// The context is created lazily on the first rendered frame and lives until the
+	// plugin is unloaded. A video mode change (vid_restart, windowed↔fullscreen)
+	// rebuilds the backends but keeps the context, so the pointer stays valid for
+	// the whole engine session. Never cache it across GetPluginModuleHandle-based
+	// re-resolution, and always call ImGui::SetCurrentContext() from OnImGuiFrame.
 	virtual ImGuiContext* GetImGuiContext() = 0;
 
 	// Retrieve raw relative mouse movement accumulated during IN_Accumulate.
