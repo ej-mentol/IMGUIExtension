@@ -2,7 +2,14 @@
 #include <vector>
 #include <string>
 #include <cassert>
-#include "../Dispatcher.h"
+
+#include <metahook.h>
+
+#include "../src/Dispatcher.h"
+
+// SafeInvoke reports consumer crashes through the host console. The test binary
+// links without an engine, so provide the storage the header references.
+cl_enginefunc_t gEngfuncs = {};
 
 std::vector<std::string> g_ExecutionLog;
 
@@ -10,8 +17,11 @@ class MockCallbacks : public IImGuiExtensionCallbacks
 {
 public:
 	MockCallbacks(const char* name, int altitude, bool wantsInput = false)
-		: m_Name(name), m_Altitude(altitude), m_WantsInput(wantsInput), m_Dispatcher(nullptr), m_UnregisterTarget(nullptr)
-		, m_bInitCalled(false), m_bStartCalled(false), m_bShutdownCalled(false), m_iPostUnregisterWrite(0)
+		: m_Name(name), m_Altitude(altitude), m_WantsInput(wantsInput)
+		, m_pFrameDispatcher(nullptr), m_pFrameUnregister(nullptr)
+		, m_pShutdownDispatcher(nullptr), m_pShutdownUnregister(nullptr)
+		, m_bInitCalled(false), m_bStartCalled(false), m_bShutdownCalled(false)
+		, m_iShutdownCalls(0), m_iPostUnregisterWrite(0)
 	{}
 
 	int GetAltitude() const override { return m_Altitude; }
@@ -19,21 +29,31 @@ public:
 
 	void Initialize() override { m_bInitCalled = true; }
 	void Start(cl_enginefunc_t* engineFuncs, int interfaceVersion) override { m_bStartCalled = true; }
-	void Shutdown() override { m_bShutdownCalled = true; }
+
+	void Shutdown() override
+	{
+		m_bShutdownCalled = true;
+		++m_iShutdownCalls;
+
+		// A consumer may unregister other callbacks (or itself) from Shutdown();
+		// the dispatcher must tolerate that without recursing or double-destroying.
+		if (m_pShutdownDispatcher && m_pShutdownUnregister)
+			m_pShutdownDispatcher->Unregister(m_pShutdownUnregister);
+	}
 
 	void OnImGuiFrame() override
 	{
 		assert(!m_bShutdownCalled);
 		g_ExecutionLog.push_back(m_Name);
-		if (m_Dispatcher && m_UnregisterTarget)
-		{
-			m_Dispatcher->Unregister(m_UnregisterTarget);
-			if (m_UnregisterTarget == this)
-			{
-				// Verify that Shutdown was deferred and NOT called synchronously
-				assert(!m_bShutdownCalled);
 
-				// Verify that we can safely write to a member variable without UAF
+		if (m_pFrameDispatcher && m_pFrameUnregister)
+		{
+			m_pFrameDispatcher->Unregister(m_pFrameUnregister);
+			if (m_pFrameUnregister == this)
+			{
+				// Contract: Unregister() ran Shutdown() synchronously, so the object
+				// is already shut down yet still fully usable for its own cleanup.
+				assert(m_bShutdownCalled);
 				m_iPostUnregisterWrite = 42;
 			}
 		}
@@ -41,23 +61,32 @@ public:
 
 	bool WantsInputCapture() const override { return m_WantsInput; }
 
-	void SetUnregisterBehavior(CImGuiDispatcher* dispatcher, IImGuiExtensionCallbacks* target)
+	void SetFrameUnregister(CImGuiDispatcher* dispatcher, IImGuiExtensionCallbacks* target)
 	{
-		m_Dispatcher = dispatcher;
-		m_UnregisterTarget = target;
+		m_pFrameDispatcher = dispatcher;
+		m_pFrameUnregister = target;
+	}
+
+	void SetShutdownUnregister(CImGuiDispatcher* dispatcher, IImGuiExtensionCallbacks* target)
+	{
+		m_pShutdownDispatcher = dispatcher;
+		m_pShutdownUnregister = target;
 	}
 
 	bool m_bInitCalled;
 	bool m_bStartCalled;
 	bool m_bShutdownCalled;
+	int m_iShutdownCalls;
 	int m_iPostUnregisterWrite;
 
 private:
 	std::string m_Name;
 	int m_Altitude;
 	bool m_WantsInput;
-	CImGuiDispatcher* m_Dispatcher;
-	IImGuiExtensionCallbacks* m_UnregisterTarget;
+	CImGuiDispatcher* m_pFrameDispatcher;
+	IImGuiExtensionCallbacks* m_pFrameUnregister;
+	CImGuiDispatcher* m_pShutdownDispatcher;
+	IImGuiExtensionCallbacks* m_pShutdownUnregister;
 };
 
 void TestSorting()
@@ -122,7 +151,7 @@ void TestSafeUnregisterDuringIteration()
 	dispatcher.Register(&cb2);
 	dispatcher.Register(&cb3);
 
-	cb1.SetUnregisterBehavior(&dispatcher, &cb2);
+	cb1.SetFrameUnregister(&dispatcher, &cb2);
 
 	dispatcher.Dispatch([](IImGuiExtensionCallbacks* cb) {
 		cb->OnImGuiFrame();
@@ -132,13 +161,14 @@ void TestSafeUnregisterDuringIteration()
 	assert(g_ExecutionLog[0] == "High");
 	assert(g_ExecutionLog[1] == "Low");
 
-	const auto& callbacks = dispatcher.GetCallbacks();
+	const auto callbacks = dispatcher.GetCallbacks();
 	assert(callbacks.size() == 2);
 	assert(callbacks[0] == &cb1);
 	assert(callbacks[1] == &cb3);
 
-	// Since cb2 was unregistered mid-iteration, its Shutdown should be called after iteration
+	// Unregister() runs Shutdown() synchronously.
 	assert(cb2.m_bShutdownCalled);
+	assert(cb2.m_iShutdownCalls == 1);
 
 	std::cout << "[Test] TestSafeUnregisterDuringIteration passed.\n";
 }
@@ -155,7 +185,7 @@ void TestSelfUnregisterDuringIteration()
 	dispatcher.Register(&cb1);
 	dispatcher.Register(&cb2);
 
-	cb1.SetUnregisterBehavior(&dispatcher, &cb1);
+	cb1.SetFrameUnregister(&dispatcher, &cb1);
 
 	dispatcher.Dispatch([](IImGuiExtensionCallbacks* cb) {
 		cb->OnImGuiFrame();
@@ -165,15 +195,95 @@ void TestSelfUnregisterDuringIteration()
 	assert(g_ExecutionLog[0] == "High");
 	assert(g_ExecutionLog[1] == "Medium");
 
-	const auto& callbacks = dispatcher.GetCallbacks();
+	const auto callbacks = dispatcher.GetCallbacks();
 	assert(callbacks.size() == 1);
 	assert(callbacks[0] == &cb2);
 
-	// Verify deferred shutdown called AFTER iteration finished
+	// Shutdown ran before Unregister() returned, and the object stayed usable.
 	assert(cb1.m_bShutdownCalled);
+	assert(cb1.m_iShutdownCalls == 1);
 	assert(cb1.m_iPostUnregisterWrite == 42);
 
 	std::cout << "[Test] TestSelfUnregisterDuringIteration passed.\n";
+}
+
+void TestShutdownReentrancy()
+{
+	std::cout << "[Test] Running TestShutdownReentrancy...\n";
+	CImGuiDispatcher dispatcher;
+
+	MockCallbacks cb1("First", 100);
+	MockCallbacks cb2("Second", 50);
+
+	dispatcher.Register(&cb1);
+	dispatcher.Register(&cb2);
+
+	// Unregister another callback from inside Shutdown().
+	cb1.SetShutdownUnregister(&dispatcher, &cb2);
+
+	dispatcher.Shutdown();
+
+	assert(cb1.m_iShutdownCalls == 1);
+	assert(cb2.m_iShutdownCalls == 1);
+	assert(dispatcher.GetCallbacks().empty());
+
+	std::cout << "[Test] TestShutdownReentrancy passed.\n";
+}
+
+// A callback that registers a sibling while the dispatch loop is running.
+class RegisteringCallbacks : public MockCallbacks
+{
+public:
+	RegisteringCallbacks(const char* name, int altitude, CImGuiDispatcher* dispatcher, MockCallbacks* target)
+		: MockCallbacks(name, altitude), m_Dispatcher(dispatcher), m_Target(target) {}
+
+	void OnImGuiFrame() override
+	{
+		g_ExecutionLog.push_back(GetModuleName());
+		m_Dispatcher->Register(m_Target);
+	}
+
+private:
+	CImGuiDispatcher* m_Dispatcher;
+	MockCallbacks* m_Target;
+};
+
+void TestRegisterDuringDispatch()
+{
+	std::cout << "[Test] Running TestRegisterDuringDispatch...\n";
+	CImGuiDispatcher dispatcher;
+	dispatcher.Initialize();
+	dispatcher.Start(nullptr, 777);
+
+	MockCallbacks cbLate("Late", 50);
+	RegisteringCallbacks cbRegistrar("Registrar", 100, &dispatcher, &cbLate);
+	dispatcher.Register(&cbRegistrar);
+	assert(cbRegistrar.m_bInitCalled && cbRegistrar.m_bStartCalled);
+
+	g_ExecutionLog.clear();
+	dispatcher.Dispatch([](IImGuiExtensionCallbacks* cb) {
+		cb->OnImGuiFrame();
+	});
+
+	// The addition is queued, so it must not run inside the current loop.
+	assert(g_ExecutionLog.size() == 1);
+	assert(g_ExecutionLog[0] == "Registrar");
+
+	// Queued additions are applied after the loop: initialized, started and visible.
+	const auto callbacks = dispatcher.GetCallbacks();
+	assert(callbacks.size() == 2);
+	assert(cbLate.m_bInitCalled);
+	assert(cbLate.m_bStartCalled);
+
+	g_ExecutionLog.clear();
+	dispatcher.Dispatch([](IImGuiExtensionCallbacks* cb) {
+		cb->OnImGuiFrame();
+	});
+	assert(g_ExecutionLog.size() == 2);
+	assert(g_ExecutionLog[0] == "Registrar");
+	assert(g_ExecutionLog[1] == "Late");
+
+	std::cout << "[Test] TestRegisterDuringDispatch passed.\n";
 }
 
 void TestLifecycleCallbacks()
@@ -231,6 +341,8 @@ int main()
 	TestWantsInputCapture();
 	TestSafeUnregisterDuringIteration();
 	TestSelfUnregisterDuringIteration();
+	TestShutdownReentrancy();
+	TestRegisterDuringDispatch();
 	TestLifecycleCallbacks();
 	TestLateRegistrationLifecycle();
 	std::cout << "=== All Tests Passed Successfully ===\n";

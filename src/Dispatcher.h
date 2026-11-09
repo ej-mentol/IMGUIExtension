@@ -2,12 +2,23 @@
 
 #include <vector>
 #include <algorithm>
+
 #define IMGUI_DEFINE_MATH_OPERATORS
-#include "thirdparty/imgui/imgui.h"
-#include "thirdparty/imgui/imgui_internal.h"
+#include <imgui.h>
+#include <imgui_internal.h>
+
 #include "IImGuiExtension.h"
 #include "plugins.h"
 
+// Single-threaded, re-entrancy-tolerant callback registry.
+//
+// Contract:
+//  - Everything runs on the engine's main thread inside GoldSrc hooks.
+//  - Register/Unregister may be called from inside a dispatch (OnImGuiFrame,
+//    WantsInputCapture, Shutdown, ...). Structural changes are applied through
+//    index-based iteration plus a deferred-addition queue.
+//  - Unregister() invokes Shutdown() synchronously, before returning, because the
+//    caller may destroy itself immediately afterwards.
 class CImGuiDispatcher
 {
 public:
@@ -39,19 +50,26 @@ public:
 
 	void Shutdown()
 	{
-		++m_IterationDepth;
-		for (size_t i = 0; i < m_Callbacks.size(); ++i)
-		{
-			if (m_Callbacks[i]) m_Callbacks[i]->Shutdown();
-		}
-		--m_IterationDepth;
-
+		// Detach the list first: a consumer that calls Unregister() from inside its
+		// own Shutdown() would otherwise recurse into this loop and destroy the
+		// same object twice.
+		std::vector<IImGuiExtensionCallbacks*> callbacks = std::move(m_Callbacks);
 		m_Callbacks.clear();
 		m_PendingAdditions.clear();
 		m_bInitialized = false;
 		m_bStarted = false;
 		m_pEngineFuncs = nullptr;
 		m_iInterfaceVersion = 0;
+
+		++m_IterationDepth;
+		for (size_t i = 0; i < callbacks.size(); ++i)
+		{
+			if (callbacks[i]) callbacks[i]->Shutdown();
+		}
+		--m_IterationDepth;
+
+		// Callbacks registered during shutdown have no lifetime left to serve.
+		m_PendingAdditions.clear();
 	}
 
 	void Register(IImGuiExtensionCallbacks* cb)
@@ -69,10 +87,10 @@ public:
 		{
 			// Add to the vector BEFORE calling to prevent re-entrancy issues
 			m_Callbacks.push_back(cb);
-			
+
 			if (m_bInitialized) cb->Initialize();
 			if (m_bStarted) cb->Start(m_pEngineFuncs, m_iInterfaceVersion);
-			
+
 			Sort();
 		}
 	}
@@ -84,16 +102,17 @@ public:
 		if (m_IterationDepth > 0)
 		{
 			// Reentrant path (called from within WantsInputCapture, AllowKeyPassthrough, etc.)
-			// Call Shutdown() immediately before nulling the slot — the caller may destroy
-			// itself right after Unregister() returns, so deferring Shutdown() to
-			// ProcessPending() would be a use-after-free on the next Dispatch() call.
-			// Index-based iteration + deferred structural changes make this safe.
+			// Shutdown() runs immediately: the caller may destroy itself right after
+			// Unregister() returns, so deferring it would be a use-after-free.
+			// The slot is cleared first so a re-entrant query inside Shutdown() cannot
+			// reach the object being torn down. Index-based iteration makes the
+			// structural change safe.
 			for (size_t i = 0; i < m_Callbacks.size(); ++i)
 			{
 				if (m_Callbacks[i] == cb)
 				{
-					cb->Shutdown();
 					m_Callbacks[i] = nullptr;
+					cb->Shutdown();
 				}
 			}
 
@@ -102,14 +121,13 @@ public:
 			if (itAdd != m_PendingAdditions.end())
 				m_PendingAdditions.erase(itAdd);
 
-			// Do NOT add to m_PendingShutdowns — Shutdown() was already called above.
 			return;
 		}
 
 		auto it = std::find(m_Callbacks.begin(), m_Callbacks.end(), cb);
 		if (it != m_Callbacks.end())
 		{
-			// CRITICAL FIX: Erase the iterator from memory FIRST, THEN call Shutdown.
+			// Erase the slot first, then call Shutdown.
 			m_Callbacks.erase(it);
 			cb->Shutdown();
 		}
@@ -175,8 +193,9 @@ public:
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
+			const char* pszModuleName = cb->GetModuleName();
 			gEngfuncs.Con_Printf("[IMGUIExtension] Crash caught in consumer callback: %s (code 0x%08X)\n",
-				cb->GetModuleName(), GetExceptionCode());
+				pszModuleName ? pszModuleName : "<unknown>", GetExceptionCode());
 
 			// Restore ImGui window stack — if the callback crashed inside Begin() without
 			// a matching End(), CurrentWindowStack is imbalanced. The next callback would
@@ -198,7 +217,7 @@ public:
 			auto cb = m_Callbacks[i];
 			if (cb)
 			{
-				SafeInvoke(cb, func);				
+				SafeInvoke(cb, func);
 			}
 		}
 		--m_IterationDepth;
@@ -246,12 +265,12 @@ private:
 				{
 					m_Callbacks.push_back(cb);
 					added = true;
-					
+
 					if (m_bInitialized) cb->Initialize();
 					if (m_bStarted) cb->Start(m_pEngineFuncs, m_iInterfaceVersion);
 				}
 			}
-			
+
 			if (added) Sort();
 		}
 	}
