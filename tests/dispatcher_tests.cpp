@@ -355,6 +355,218 @@ void TestLateRegistrationLifecycle()
 	std::cout << "[Test] TestLateRegistrationLifecycle passed.\n";
 }
 
+#ifdef _WIN32
+class CrashingCallbacks : public MockCallbacks
+{
+public:
+	CrashingCallbacks(const char* name, int altitude, bool crashOnFrame = true)
+		: MockCallbacks(name, altitude), m_bCrashOnFrame(crashOnFrame), m_iFrameCalls(0) {}
+
+	void OnImGuiFrame() override
+	{
+		++m_iFrameCalls;
+		if (m_bCrashOnFrame)
+		{
+			RaiseException(0xE0000001, 0, 0, nullptr);
+		}
+		g_ExecutionLog.push_back(GetModuleName());
+	}
+
+	bool m_bCrashOnFrame;
+	int m_iFrameCalls;
+};
+
+void TestFaultedCallback()
+{
+	std::cout << "[Test] Running TestFaultedCallback...\n";
+	CImGuiDispatcher dispatcher;
+	CrashingCallbacks cbCrash("Crasher", 100, true);
+	MockCallbacks cbHealthy("Healthy", 50, false);
+
+	dispatcher.Register(&cbCrash);
+	dispatcher.Register(&cbHealthy);
+
+	g_ExecutionLog.clear();
+	// First dispatch: cbCrash will crash and be marked faulted; cbHealthy will run
+	dispatcher.Dispatch([](IImGuiExtensionCallbacks* cb) {
+		cb->OnImGuiFrame();
+	});
+
+	assert(cbCrash.m_iFrameCalls == 1);
+	assert(g_ExecutionLog.size() == 1);
+	assert(g_ExecutionLog[0] == "Healthy");
+
+	// Second dispatch: cbCrash is faulted, must be completely skipped
+	g_ExecutionLog.clear();
+	dispatcher.Dispatch([](IImGuiExtensionCallbacks* cb) {
+		cb->OnImGuiFrame();
+	});
+
+	// Frame calls on cbCrash must still be 1 (never called again)
+	assert(cbCrash.m_iFrameCalls == 1);
+	assert(g_ExecutionLog.size() == 1);
+	assert(g_ExecutionLog[0] == "Healthy");
+
+	// Shutdown must still invoke Shutdown on faulted callbacks
+	dispatcher.Shutdown();
+	assert(cbCrash.m_bShutdownCalled);
+	assert(cbHealthy.m_bShutdownCalled);
+
+	std::cout << "[Test] TestFaultedCallback passed.\n";
+}
+
+class CrashingShutdownCallbacks : public MockCallbacks
+{
+public:
+	CrashingShutdownCallbacks(const char* name, int altitude)
+		: MockCallbacks(name, altitude) {}
+
+	void Shutdown() override
+	{
+		MockCallbacks::Shutdown();
+		RaiseException(0xE0000002, 0, 0, nullptr);
+	}
+};
+
+void TestCrashingShutdown()
+{
+	std::cout << "[Test] Running TestCrashingShutdown...\n";
+	CImGuiDispatcher dispatcher;
+	CrashingShutdownCallbacks cbCrash("CrashOnShutdown", 100);
+	MockCallbacks cbHealthy("Healthy", 50);
+
+	dispatcher.Register(&cbCrash);
+	dispatcher.Register(&cbHealthy);
+
+	// Shutdown should catch the exception and safely finish shutting down all callbacks
+	dispatcher.Shutdown();
+	assert(cbCrash.m_bShutdownCalled);
+	assert(cbHealthy.m_bShutdownCalled);
+
+	// Also verify Unregister catches exception during Shutdown() without crashing
+	dispatcher.Register(&cbCrash);
+	dispatcher.Unregister(&cbCrash);
+
+	std::cout << "[Test] TestCrashingShutdown passed.\n";
+}
+
+class CrashingStyleVarCallbacks : public MockCallbacks
+{
+public:
+	CrashingStyleVarCallbacks(const char* name, int altitude)
+		: MockCallbacks(name, altitude), m_iFrameCalls(0) {}
+
+	void OnImGuiFrame() override
+	{
+		++m_iFrameCalls;
+		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5f);
+		RaiseException(0xE0000003, 0, 0, nullptr);
+	}
+
+	int m_iFrameCalls;
+};
+
+void TestImGuiStackRecoveryOnCrash()
+{
+	std::cout << "[Test] Running TestImGuiStackRecoveryOnCrash...\n";
+	ImGuiContext* ctx = ImGui::CreateContext();
+	ImGui::SetCurrentContext(ctx);
+	ImGuiIO& io = ctx->IO;
+	io.DisplaySize = ImVec2(800.0f, 600.0f);
+	// Headless test without a real renderer backend: inform ImGui that textures are supported
+	// so NewFrame builds the default font atlas without asserting.
+	io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+
+	// Start a frame so WithinFrameScope and CurrentWindow are active
+	ImGui::NewFrame();
+	const int initialStyleVarStackSize = ctx->StyleVarStack.Size;
+
+	CImGuiDispatcher dispatcher;
+	CrashingStyleVarCallbacks cbCrash("StyleCrasher", 100);
+	MockCallbacks cbHealthy("Healthy", 50);
+
+	dispatcher.Register(&cbCrash);
+	dispatcher.Register(&cbHealthy);
+
+	g_ExecutionLog.clear();
+	dispatcher.Dispatch([](IImGuiExtensionCallbacks* cb) {
+		cb->OnImGuiFrame();
+	});
+
+	// Crash was caught; ImGui state recovery must have restored StyleVarStack
+	assert(cbCrash.m_iFrameCalls == 1);
+	assert(ctx->StyleVarStack.Size == initialStyleVarStackSize);
+	assert(g_ExecutionLog.size() == 1);
+	assert(g_ExecutionLog[0] == "Healthy");
+
+	// Second dispatch: faulted consumer is skipped, StyleVarStack remains intact
+	g_ExecutionLog.clear();
+	dispatcher.Dispatch([](IImGuiExtensionCallbacks* cb) {
+		cb->OnImGuiFrame();
+	});
+	assert(cbCrash.m_iFrameCalls == 1);
+	assert(ctx->StyleVarStack.Size == initialStyleVarStackSize);
+	assert(g_ExecutionLog.size() == 1);
+	assert(g_ExecutionLog[0] == "Healthy");
+
+	ImGui::EndFrame();
+	ImGui::DestroyContext(ctx);
+	std::cout << "[Test] TestImGuiStackRecoveryOnCrash passed.\n";
+}
+
+class CrashingCaptureCallbacks : public MockCallbacks
+{
+public:
+	CrashingCaptureCallbacks(const char* name, int altitude)
+		: MockCallbacks(name, altitude), m_iCaptureCalls(0), m_bShouldCrash(true) {}
+
+	bool WantsInputCapture() const override
+	{
+		const_cast<CrashingCaptureCallbacks*>(this)->m_iCaptureCalls++;
+		if (m_bShouldCrash)
+		{
+			RaiseException(0xE0000004, 0, 0, nullptr);
+		}
+		return true;
+	}
+
+	int m_iCaptureCalls;
+	bool m_bShouldCrash;
+};
+
+void TestWantsInputCaptureFaultAndReRegister()
+{
+	std::cout << "[Test] Running TestWantsInputCaptureFaultAndReRegister...\n";
+	CImGuiDispatcher dispatcher;
+	CrashingCaptureCallbacks cbCrash("CaptureCrasher", 100);
+	MockCallbacks cbHealthy("Healthy", 50, false);
+
+	dispatcher.Register(&cbCrash);
+	dispatcher.Register(&cbHealthy);
+
+	// First query: cbCrash crashes, AnyWantsInputCapture must catch it, return false, and mark cbCrash faulted
+	bool wants = dispatcher.AnyWantsInputCapture();
+	assert(!wants);
+	assert(cbCrash.m_iCaptureCalls == 1);
+
+	// Second query: cbCrash is faulted and must be skipped without calling WantsInputCapture again
+	wants = dispatcher.AnyWantsInputCapture();
+	assert(!wants);
+	assert(cbCrash.m_iCaptureCalls == 1);
+
+	// Re-registering the same mock clears faulted state
+	cbCrash.m_bShouldCrash = false;
+	dispatcher.Register(&cbCrash);
+
+	// Third query: cbCrash is no longer faulted and returns true
+	wants = dispatcher.AnyWantsInputCapture();
+	assert(wants);
+	assert(cbCrash.m_iCaptureCalls == 2);
+
+	std::cout << "[Test] TestWantsInputCaptureFaultAndReRegister passed.\n";
+}
+#endif
+
 int main()
 {
 	std::cout << "=== Running Dispatcher Unit Tests ===\n";
@@ -366,6 +578,12 @@ int main()
 	TestRegisterDuringDispatch();
 	TestLifecycleCallbacks();
 	TestLateRegistrationLifecycle();
+#ifdef _WIN32
+	TestFaultedCallback();
+	TestCrashingShutdown();
+	TestImGuiStackRecoveryOnCrash();
+	TestWantsInputCaptureFaultAndReRegister();
+#endif
 	std::cout << "=== All Tests Passed Successfully ===\n";
 	return 0;
 }

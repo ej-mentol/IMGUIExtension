@@ -1,37 +1,37 @@
 # IMGUIExtension
 
-`IMGUIExtension` is a core arbitrator/host plugin designed to integrate Dear ImGui into Sven Co-op using the MetaHook framework. By managing the global ImGui context, Win32 window message interception, and OpenGL rendering state, it provides a stable environment for lightweight consumer plugins (such as custom menus or HUD overlays) without requiring them to bundle individual rendering backends.
+`IMGUIExtension` is a MetaHook plugin that hosts Dear ImGui for Sven Co-op. It manages the shared ImGui context, Win32 window message interception, and OpenGL rendering so consumer plugins (such as custom menus or HUD overlays) do not need to bundle individual rendering backends.
 
 ---
 
 ## Technical Overview
 
-The plugin solves several architecture-specific hurdles inherent to GoldSrc/Sven Co-op's rendering pipeline and VGUI2 focus management.
+Architecture details for GoldSrc/Sven Co-op rendering and VGUI2 integration:
 
-### Key Architectural Features
+### Architecture
 
-1. **Unified Context & Font Atlas**
+1. **Context & Font Atlas**
    The global `ImGuiContext` is created lazily on the first rendered frame. Fonts are loaded and merged dynamically based on the local configuration file `imguiextension/imguiextension.json` before backend compilation. By default, the extension:
-   * **Configures Local Fonts**: Automatically lists and configures TrueType font files placed in the `imguiextension/fonts/` directory.
-   * **Supports Merged Glyphs**: Allows merging multiple icon or symbol fonts (such as Font Awesome or Segoe UI Symbol) using ImGui's `MergeMode = true`, covering standard Latin, Cyrillic, and Private Use Area (PUA) symbol charts `[0xF000, 0xFFFF]`.
-   * **Validates before loading**: every configured entry is resolved and checked (regular file, >100 bytes) and loaded with `ImFontFlags_NoLoadError`, so a stale or truncated config entry is logged and skipped instead of asserting inside ImGui's loader.
-   * **Keeps the context stable**: a video mode change rebuilds only the Win32/OpenGL2 backends. The context pointer returned by `GetImGuiContext()` stays valid for the whole engine session, so consumers may follow the documented "set current context each frame" pattern without re-resolving anything.
+   * **Configures Local Fonts**: Lists and configures TrueType font files placed in the `imguiextension/fonts/` directory.
+   * **Supports Merged Glyphs**: Merges multiple icon or symbol fonts (such as Font Awesome or Segoe UI Symbol) using ImGui's `MergeMode = true`, covering standard Latin, Cyrillic, and Private Use Area (PUA) symbol charts `[0xF000, 0xFFFF]`.
+   * **Validates before loading**: Every configured entry is checked (regular file, >100 bytes) and loaded with `ImFontFlags_NoLoadError`; missing or invalid entries are logged and skipped instead of asserting.
+   * **Keeps the context stable**: Video mode changes rebuild only the Win32/OpenGL2 backends. The context pointer returned by `GetImGuiContext()` remains valid across the entire engine session.
 
 2. **Cached HWND Arbitrator**
-   Sven Co-op's VGUI2 engine creates native Win32 child text boxes (e.g., when the chat box gains focus), which collapses the standard active window metrics. `IMGUIExtension` uses an `EnumWindows` callback to match the current process ID against class names `"SDL_app"` or `"ValveHalfLifeWindow"`, caching the true top-level game window. There is deliberately no `GetForegroundWindow()` fallback: subclassing an unrelated application's window must not happen, so a missing window simply retries on the next frame.
+   Sven Co-op's VGUI2 engine creates native Win32 child text boxes (e.g. when chat input gains focus), which collapses standard active window metrics. `IMGUIExtension` uses an `EnumWindows` callback matching the process ID against class names `"SDL_app"` or `"ValveHalfLifeWindow"`, caching the top-level game window. There is deliberately no `GetForegroundWindow()` fallback to prevent attaching to unrelated processes.
 
 3. **SDL2 Relative Mouse Mode Sync**
-   Properly intercepts and deactivates SDL2 relative mouse mode when consumer UIs request input capture. When capture is released, it restores the relative state to prevent the in-game camera from snapping. SDL2 is resolved from the already loaded `SDL2.dll`; only its headers are a build dependency.
+   Deactivates SDL2 relative mouse mode when consumer UIs request input capture, and restores it when capture is released to prevent camera angle snaps. SDL2 functions are resolved dynamically from `SDL2.dll`.
 
-4. **Resolution Switch Safeguards**
-   GoldSrc destroys and re-creates the OpenGL device context upon video mode changes or resolution switches. `IMGUIExtension` catches this during `BaseUI::Paint` and `HUD_VidInit`, restores the WndProc subclass, discards a frame that was begun but never rendered, and re-initializes the GL2/Win32 backend states. A failed (re-)initialization is rolled back and retried on a later frame instead of leaving a half-installed subclass.
+4. **Resolution Switch Handling**
+   GoldSrc re-creates the OpenGL device context on video mode or resolution changes. `IMGUIExtension` detects this during `BaseUI::Paint` and `HUD_VidInit`, unhooks the subclassed `WNDPROC`, discards unrendered frames, and re-initializes backend states. If re-initialization fails, it rolls back cleanly and retries on the next frame.
 
-5. **Robust Reentrant Dispatcher**
-   To safely host multiple independent consumer plugins, the core utilizes a highly resilient dispatch system (`CImGuiDispatcher`). It prevents common modding crashes through:
-   * **Zero-Iterator-Invalidation**: All callback iterations use safe index-based loops and a recursion depth counter instead of standard iterators.
-   * **Deferred Mutation Queues**: If a consumer plugin registers itself (or another component) in the middle of a dispatch loop or an input event, the addition is queued and applied afterwards.
-   * **Synchronous unregistration**: `UnregisterCallbacks()` runs the consumer's `Shutdown()` before returning, so a plugin may free itself immediately; a `Shutdown()` that unregisters other callbacks cannot recurse.
-   * **SEH Protection**: Consumer callback invocations and input checks are wrapped in Structured Exception Handling (`__try` / `__except`) blocks, ensuring a crash or null-pointer dereference in a client plugin does not crash the host extension or the game process. The ImGui window stack is unwound after a caught exception so later callbacks start clean.
+5. **Reentrant Dispatcher (`CImGuiDispatcher`)**
+   Manages consumer plugin callbacks:
+   * **Index-based iteration**: Loops use indices and recursion depth tracking to prevent iterator invalidation during nested calls.
+   * **Deferred registration**: Registrations during active dispatch loops are queued and applied once execution unwinds.
+   * **Synchronous unregistration**: `Unregister()` executes `Shutdown()` synchronously before releasing the callback, clearing the slot first to prevent re-entrant queries.
+   * **Structured Exception Handling (SEH)**: Callback invocations (`Initialize`, `Start`, `OnImGuiFrame`, `WantsInputCapture`, `AllowKeyPassthrough`, `Shutdown`) are wrapped in `__try` / `__except` blocks. Crashed consumers are marked as faulted, logged once to the console, and excluded from subsequent dispatches and capture queries. The ImGui state is restored using `ErrorRecoveryTryToRecoverState`.
 
 ---
 
@@ -185,6 +185,10 @@ cmake --build build/format --config Release --target format
   JSON also writes those bytes verbatim and then fails UTF-8 parsing.
 * A non-empty config is not regenerated automatically; a config whose entries all became
   unusable falls back to the built-in font and only logs the individual failures.
+* ~~Consumer callback crash leaves ImGui window and internal stacks unbalanced~~ (resolved: state recovery via `ErrorRecoveryTryToRecoverState` and faulty callback isolation).
+* ~~Crashing consumer during shutdown or unregister causes host process termination~~ (resolved: `SafeShutdown` isolates SEH exceptions during cleanup).
+* ~~Sequential `pfnClientCmd` invocations concatenate in GoldSrc `Cbuf_AddText`~~ (resolved: commands explicitly terminated with `\n`).
+* ~~Resolution switch causing recursive `WNDPROC` subclassing~~ (resolved: existing `WNDPROC` restored prior to resetting window handle and guarded against self-subclassing).
 
 ## License
 

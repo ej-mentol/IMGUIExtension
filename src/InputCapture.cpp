@@ -154,7 +154,10 @@ LRESULT CALLBACK ImGui_WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			}
 		}
 
-		// Also block game inputs when ImGui wants capture
+		// Also block game inputs when ImGui wants capture.
+		// WM_MOUSEMOVE is blocked intentionally so background VGUI2 panels (e.g. MOTD, chat)
+		// do not receive hover/cursor events while a consumer owns exclusive input.
+		// ImGui already processed the movement in ImGui_ImplWin32_WndProcHandler above.
 		if (bWantsInputCapture)
 		{
 			switch (msg)
