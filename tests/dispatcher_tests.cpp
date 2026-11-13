@@ -111,6 +111,27 @@ void TestSorting()
 	assert(g_ExecutionLog[0] == "High");
 	assert(g_ExecutionLog[1] == "Medium");
 	assert(g_ExecutionLog[2] == "Low");
+
+	// Equal altitudes must keep their relative insertion order (contract requirement)
+	CImGuiDispatcher dispatcherStable;
+	MockCallbacks cbEq1("Eq1", 50);
+	MockCallbacks cbEq2("Eq2", 50);
+	MockCallbacks cbEq3("Eq3", 50);
+
+	dispatcherStable.Register(&cbEq1);
+	dispatcherStable.Register(&cbEq2);
+	dispatcherStable.Register(&cbEq3);
+
+	g_ExecutionLog.clear();
+	dispatcherStable.Dispatch([](IImGuiExtensionCallbacks* cb) {
+		cb->OnImGuiFrame();
+	});
+
+	assert(g_ExecutionLog.size() == 3);
+	assert(g_ExecutionLog[0] == "Eq1");
+	assert(g_ExecutionLog[1] == "Eq2");
+	assert(g_ExecutionLog[2] == "Eq3");
+
 	std::cout << "[Test] TestSorting passed.\n";
 }
 
