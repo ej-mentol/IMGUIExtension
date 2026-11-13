@@ -232,10 +232,12 @@ void UpdateInputCaptureState()
 			{
 				// Release every action the engine may still hold. The table above is
 				// the canonical button -> command mapping, so this cannot drift from it.
+				// Commands must end with '\n' so Cbuf_AddText does not concatenate them.
 				for (const auto& mapping : s_ButtonToCmds)
 				{
 					std::string release = "-";
 					release += mapping.cmd + 1; // mapping.cmd is "+name"
+					release += "\n";
 					gEngfuncs.pfnClientCmd(release.data());
 				}
 			}
@@ -274,8 +276,12 @@ void UpdateInputCaptureState()
 					// Restore only from the snapshot taken at capture ON, not the live set.
 					// The live set may contain keys pressed during menu navigation which are
 					// already in the correct state once the menu closes.
+					// Commands must end with '\n' so Cbuf_AddText executes them separately.
 					for (const auto& cmd : s_PreCaptureCommands)
-						gEngfuncs.pfnClientCmd((char*)cmd.c_str());
+					{
+						std::string restore = cmd + "\n";
+						gEngfuncs.pfnClientCmd(restore.data());
+					}
 				}
 			}
 
@@ -350,6 +356,13 @@ void ImGui_InitOnce()
 		ImGui_ImplWin32_Shutdown();
 		return;
 	}
+	if (pfnOldWndProc == ImGui_WndProc)
+	{
+		// Guard against recursive self-subclassing if already hooked.
+		ImGui_ImplOpenGL2_Shutdown();
+		ImGui_ImplWin32_Shutdown();
+		return;
+	}
 
 	g_pfnOldWndProc = pfnOldWndProc;
 	g_bImGuiInitialized = true;
@@ -395,21 +408,23 @@ void ImGui_VidReinit()
 	if (!g_bImGuiInitialized) return;
 
 	// The engine may destroy and re-create both the window and the OpenGL context
-	// on a video mode change, so re-resolve the window, restore the subclass and
-	// rebuild both backends. The ImGui context itself is kept: consumers cache the
-	// pointer returned by GetImGuiContext().
-	ResetGameHWND();
-
-	HWND hWnd = GetGameHWND();
-	if (hWnd && g_pfnOldWndProc)
+	// on a video mode change, so restore the subclass on the known window first,
+	// then reset the cached HWND and rebuild backends. The ImGui context itself
+	// is kept: consumers cache the pointer returned by GetImGuiContext().
+	if (g_pfnOldWndProc)
 	{
-		WNDPROC current = (WNDPROC)GetWindowLongPtr(hWnd, GWLP_WNDPROC);
-		if (current == ImGui_WndProc)
+		HWND hWnd = GetGameHWND();
+		if (hWnd)
 		{
-			SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)g_pfnOldWndProc);
+			WNDPROC current = (WNDPROC)GetWindowLongPtr(hWnd, GWLP_WNDPROC);
+			if (current == ImGui_WndProc)
+			{
+				SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)g_pfnOldWndProc);
+			}
 		}
+		g_pfnOldWndProc = nullptr;
 	}
-	g_pfnOldWndProc = nullptr;
+	ResetGameHWND();
 
 	// A frame that was begun but not rendered references GL objects that the old
 	// context owned; discard it instead of rendering stale draw data.

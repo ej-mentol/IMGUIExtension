@@ -10,6 +10,18 @@
 #include "IImGuiExtension.h"
 #include "plugins.h"
 
+inline const char* SafeGetModuleName(IImGuiExtensionCallbacks* cb)
+{
+	__try
+	{
+		return cb ? cb->GetModuleName() : "<null>";
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return "<crashed in GetModuleName>";
+	}
+}
+
 // Single-threaded, re-entrancy-tolerant callback registry.
 //
 // Contract:
@@ -193,7 +205,7 @@ public:
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
-			const char* pszModuleName = cb->GetModuleName();
+			const char* pszModuleName = SafeGetModuleName(cb);
 			gEngfuncs.Con_Printf("[IMGUIExtension] Crash caught in consumer callback: %s (code 0x%08X)\n",
 				pszModuleName ? pszModuleName : "<unknown>", GetExceptionCode());
 
@@ -203,7 +215,13 @@ public:
 			if (ctx)
 			{
 				while (ctx->CurrentWindowStack.Size > savedWindowStackSize)
-					ImGui::End();
+				{
+					ImGuiWindow* window = ctx->CurrentWindow;
+					if (window && (window->Flags & ImGuiWindowFlags_ChildWindow))
+						ImGui::EndChild();
+					else
+						ImGui::End();
+				}
 			}
 		}
 	}
@@ -277,7 +295,7 @@ private:
 
 	void Sort()
 	{
-		std::sort(m_Callbacks.begin(), m_Callbacks.end(), [](IImGuiExtensionCallbacks* a, IImGuiExtensionCallbacks* b) {
+		std::stable_sort(m_Callbacks.begin(), m_Callbacks.end(), [](IImGuiExtensionCallbacks* a, IImGuiExtensionCallbacks* b) {
 			if (!a) return false;
 			if (!b) return true;
 			return a->GetAltitude() > b->GetAltitude();

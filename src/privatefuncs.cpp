@@ -22,8 +22,9 @@ void PrivateFuncs_Init(void)
 		g_pfnSDL_SetRelativeMouseMode = (pfnSDL_SetRelativeMouseMode)GetProcAddress(hSDL2, "SDL_SetRelativeMouseMode");
 	}
 
-	// Sys_GetMainWindow is an engine export — returns SDL_Window* on SDL2, or HWND on legacy
-	HMODULE hEngine = GetModuleHandleA("hw.dll");
+	// Prefer MetaHook API to resolve the true engine module, then fallback to known DLL names
+	HMODULE hEngine = g_pMetaHookAPI ? (HMODULE)g_pMetaHookAPI->GetEngineModule() : nullptr;
+	if (!hEngine) hEngine = GetModuleHandleA("hw.dll");
 	if (!hEngine) hEngine = GetModuleHandleA("sw.dll");
 	if (!hEngine) hEngine = GetModuleHandleA("engine.dll"); // SvEngine / HL25
 	if (hEngine)
